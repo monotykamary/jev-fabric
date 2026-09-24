@@ -1,5 +1,8 @@
 # Acceptance ledger
 
+> This ledger covers the preserved TypeScript reference. Native Bend coverage
+> and outstanding work are tracked in [the migration ledger](bend-migration.md).
+
 The initial release is a trusted, native process orchestrator, not a tool registry,
 sandbox, chat agent, or restart-resumable workflow engine. No Pi dependency or
 changes to the sibling projects are required.

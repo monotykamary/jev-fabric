@@ -1,5 +1,8 @@
 # Verification evidence
 
+> Historical evidence for the TypeScript baseline. Current native coverage and
+> limitations are recorded in [the Bend migration ledger](bend-migration.md).
+
 Initial implementation verified on 2026-09-24.
 
 ## Offline

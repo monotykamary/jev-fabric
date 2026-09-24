@@ -1,7 +1,7 @@
 name: ci
 on: [push, pull_request]
 jobs:
-  test:
+  reference:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -13,4 +13,14 @@ jobs:
           node-version: 24
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run test
+      - run: bun run test:reference
+  native:
+    # The pinned macOS release archive has an invalid signature; see docs/bend-migration.md.
+    runs-on: ubuntu-latest
+    env:
+      BEND_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: sh scripts/setup-bend-ci.sh
+      - run: bun run test:native

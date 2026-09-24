@@ -1,266 +1,77 @@
 # jev-fabric
 
-**Process orchestration with typed System One decisions. No required agent harness or tool registry.**
+Process orchestration with Jev at decision boundaries, independent of Pi,
+Codex, Claude, or any other harness.
 
-The calling harness owns intent. Ordinary code owns execution. Jev supplies
-small typed judgments only where a semantic decision is needed.
+**We are pivoting to native Bend. This is a working native spike, not yet a
+feature-complete replacement for the TypeScript runtime.** The original
+implementation remains available as a [reference](docs/typescript-reference.md)
+until native parity is verified. Nothing is published.
 
-```text
-Codex / Claude / Pi / shell
-            │
-    native JS/TS program
-            │
-  processes ↔ bounded events
-            │
-    optional Jev judgment
-            │
- code-owned action or handoff
-```
+## Native quickstart
 
-Initial local release: `private: true`, no publishing or automatic harness
-installation. Requires **Node 24+ on macOS/Linux**, plus `bash` for shell scripts.
-No runtime npm dependencies.
-
-## Quickstart
+Requires **Bend 2.0.27** and Clang (14+ for this CPU-only program).
+The resulting executable needs neither Node nor Bun.
 
 ```sh
-bun install --frozen-lockfile
-bun run build
-node dist/src/cli.js run examples/pipeline.ts
-node dist/src/cli.js run examples/persistent-rpc.ts
-node dist/src/cli.js run examples/monitor.ts
-bun run test
+sh scripts/build-native.sh                 # or: bun run build
+build/jev-fabric -- --help
+build/jev-fabric -- exec 2000 /bin/echo hello
+printf 'native stdin\n' | build/jev-fabric -- exec 2000 --stdin /bin/cat
+build/jev-fabric -- exec 2000 /bin/sh -c 'printf hello | tr a-z A-Z'
 ```
 
-These examples and the test suite are offline: local fixture processes, no model
-keys, browser, or native apps. The installed binary is `jev-fabric`; the
-`node dist/src/cli.js` form works directly from the checkout.
+The first `--` separates Bend runtime options from application arguments.
+Shell syntax is interpreted only when you explicitly execute a shell.
+This is **native-only**: compile with `-o`, rather than using Bend's default
+JavaScript execution mode. There is no JavaScript foreign-effect twin.
 
-## Ordinary programs
+Implemented in `native/`:
 
-Programs default-export a function. `defineProgram` is an optional typing helper:
+- **Bend:** budgets, terminal transitions, typed-value Choice/Noul/Score
+  validation, literal monitor filtering/deduplication, bounded batches,
+  JSON output, CLI control flow, and proof contracts.
+- **C:** one POSIX process effect for argv/stdin, bounded output capture,
+  asynchronous IO workers, deadlines, signals, and process-group cleanup.
 
-```ts
-import { defineProgram } from 'jev-fabric';
+A zero process exit is reported as `exited`, **not verified task completion**.
+Native execution is trusted, not sandboxed. See the
+[capability matrix, safety limits, and rollout blockers](docs/bend-migration.md).
 
-export default defineProgram(async ({ shell, emit, handoff }) => {
-  const receipt = await shell.exec({
-    command: 'node', args: ['-e', 'console.log("ready")'],
-  });
-  if (receipt.exitCode !== 0) handoff('Command failed', { exitCode: receipt.exitCode });
-  if (receipt.stdout.trim() !== 'ready') handoff('Unexpected result');
-  emit('verified', { ready: true });
-  return { ready: true };
-});
-```
-
-Examples resolve the package self-reference after building. External projects
-can install the checkout as a local dependency. Imports resolve from the program
-file. TypeScript uses Node's built-in type stripping: use erasable syntax, not
-enums or parameter properties. Stripping is **not typechecking**; typecheck
-programs with their own project tooling. Validate input and postconditions in code.
-
-Context:
-
-- `input`: finite JSON from `--input file.json` / `--input -`, otherwise `null`.
-- `shell.spawn(options)`: a live owned process; `shell.exec(options)` awaits it.
-- `shell.script(source, options?)`: explicit `bash -euo pipefail -c` execution.
-- `jev.evaluate({state, questions})`: typed judgments, never generated prose.
-- `events.subscribe(after?)`: bounded runtime events with historical gap markers.
-- `emit(type, data)`, `sleep(ms)`, `signal`: progress and cooperative cancellation.
-- `handoff(reason, evidence?)`: terminal `needs_attention`, not successful completion.
-
-Results must be finite JSON, at most 32 KiB; return `null`, not `undefined`.
-Handoff evidence is capped at 16 KiB; input at 128 KiB. These are interface
-bounds, **not native-code memory isolation**.
-
-## Shells, pipes, heredocs, persistent subprocesses
-
-`command` plus `args` executes without a shell; metacharacters stay literal.
-Use `shell.script` when shell interpretation is intended. No application adapter
-or automatic connection discovery is required.
-
-```ts
-const result = await shell.script("cat <<'TEXT' | tr a-z A-Z\nhello\nTEXT");
-const child = shell.spawn({ command: 'some-jsonl-server', args: [] });
-const replies = child.lines(); // subscribe BEFORE sending requests
-await child.write(JSON.stringify({ id: 1, method: 'observe' }) + '\n');
-const frame = await replies.next();
-// Validate frame.done, JSON, response ID, and result/error against the server contract.
-child.end();
-const receipt = await child.wait();
-```
-
-Handles expose `write`, `end`, `pipeTo`, `lines`, `events`, `wait`, and `stop`.
-`exec` closes stdin; `spawn` keeps it open unless `input` is supplied. `pipeTo`
-streams stdout into another handle's stdin with Node backpressure. Check **each**
-receipt in a pipeline. `env` overrides individual inherited environment entries.
-
-`lines('stdout' | 'stderr', capacity?)` fails on overflow or lines over 128 KiB;
-it never silently drops protocol messages. Final unterminated text is returned
-as a line; protocols requiring newlines must account for this. Close abandoned
-iterators. Bounded event previews are **not lossless RPC transports**.
-
-A JavaScript module may also come from stdin:
+## Verification
 
 ```sh
-node dist/src/cli.js run - <<'JS'
-export default async ({ shell }) => {
-  const result = await shell.script('printf "hello\\n"');
-  return { output: result.stdout, exitCode: result.exitCode };
-};
-JS
+bun install --frozen-lockfile --ignore-scripts  # reference development dependencies
+bun run test:native                           # Bend proofs, native binaries, Bun test driver
+bun run test:reference                        # preserved TypeScript implementation
+bun run test                                 # both
 ```
 
-Stdin modules are stored privately with the run. Their imports resolve from the
-run directory, not the working directory; use a program file for local imports.
-Shell commands still run in the caller's working directory. Program source and
-JSON input cannot both consume stdin.
+Bun is a development/test tool here, not a dependency of the native executable.
+`build:reference`, the package SDK/bin entries, and `demo` retain the reference
+implementation's compatibility surface; run `bun run build:reference` first.
+The default `build` now builds Bend.
 
-### Browser/macOS harness composition
+Local verification includes 23 core assertions, five proof contracts, three
+native IO assertions, 12 native integration tests, and 26 reference tests.
+The native CLI also passes checks under UBSan and C-effect-only ASan.
+Whole-program ASan remains an unresolved compiler/runtime investigation; it
+is **not** claimed green.
 
-Use their existing CLIs or libraries. An explicitly authorized browser snippet
-can be passed as `input` to `shell.exec({command:'browser-harness-js',
-input:snippet})`. Its existing daemon preserves the browser connection. Follow
-its session/scope setup; jev-fabric never connects automatically.
+## What remains
 
-For native AX, retain `shell.spawn({command:'macos-harness', args:['serve',
-'--app','com.apple.TextEdit']})` and exchange JSON lines. Prefer its guarded
-observe/act contract; a new process per action loses controller handles. These
-are integration patterns, **not automatically executed commands**. Authorize
-targets and permissions first. Existing guarded controllers need no registration
-here. Raw access is not permission to bypass a denial.
+Strict bounded JSON decoding and Jev HTTP/TLS/credential handling; persistent
+JSONL and live output streams; detached start/status/events/wait/stop; durable
+bounded event delivery; and supervision of arbitrary Bend programs.
 
-## Background runs and monitors
+Bend Base does not currently supply subprocess, HTTPS, or JSON APIs. The
+confirmed route is **Bend-owned orchestration with a small native OS/TLS effect
+layer**, not a TypeScript runner hidden behind Bend.
 
-```sh
-node dist/src/cli.js start examples/monitor.ts
-node dist/src/cli.js status <id>
-node dist/src/cli.js events <id> --after 0 --follow
-node dist/src/cli.js wait <id>
-node dist/src/cli.js stop <id>
-```
+## Project history
 
-`start` returns after an independent supervisor is ready. It owns the worker and
-managed process groups until settlement or deadline; the caller may exit. No
-model waits for processes. `stop` addresses a private run handle, never an
-arbitrary PID. Terminal stop/wait requests are idempotent.
+- `ba74ea5`: verified original runtime, 26 tests passing.
+- `2fa11e1`: Bun lockfile/workflow; project-local npm artifacts/cache removed.
 
-`run` cancels on SIGINT/SIGTERM. Cancelling `wait`/event following does **not** stop
-the run. Their default client deadline is 30 seconds (`--timeout-ms` overrides
-it); that never extends the program deadline.
-
-```ts
-const job = shell.spawn({
-  command: './watch-build.sh',
-  monitor: { match: 'STATUS:', intervalMs: 250, lifetimeMs: 300000 },
-});
-for await (const event of job.events()) {
-  if (event.type !== 'process.monitor') continue;
-  // Exact parsing first; explicitly call Jev only for a semantic question.
-}
-```
-
-Monitors frame stdout incrementally, apply an optional **literal** match,
-suppress adjacent duplicate matching lines, and batch at most eight previews.
-Omissions and truncation are explicit. `intervalMs` is **delivery cadence**, not
-the watched script's polling interval. Expiration stops the process. There is
-no automatic renewal, restart, or inference. Stderr is captured separately;
-quiet output does not prove a process is stuck.
-
-`examples/monitor.ts` recognizes an exact READY marker without Jev.
-`examples/semantic-monitor.ts` makes one real judgment over a synthetic build
-failure and should hand back `needs_attention` (exit 3).
-
-## Jev authentication and judgments
-
-`JEV_PROVIDER`: `typesafe` (default), `openrouter`, or `vercel`. Keys:
-`TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, or `AI_GATEWAY_API_KEY`, respectively.
-`JEV_MODEL` can select a provider-appropriate model ID. Endpoints are fixed HTTPS
-URLs; redirects are rejected.
-
-Alternatively, explicitly configure a **trusted argv command**, not shell code:
-
-```sh
-export JEV_CREDENTIAL_COMMAND='["localterm","secret","get","typesafe_api_key"]'
-node dist/src/cli.js evaluate --request examples/decision.json
-node dist/src/cli.js run examples/semantic-monitor.ts --max-evaluations 1
-```
-
-These commands make **paid requests** over synthetic example data. No live calls
-run in tests/CI. Help/status and deterministic programs never retrieve a key.
-An SDK key or provider environment key takes precedence over the command. The
-command executes only when needed, has a 5-second deadline and 16 KiB private
-output limit, and caches its successful key per client. Keys never enter request
-bodies, run records, or this client's diagnostics. Command errors and HTTP error
-bodies are suppressed. Trusted native programs can access credentials themselves:
-this is data hygiene, **not secret isolation**.
-
-SDK: `new JevClient({provider, credentialCommand, maxEvaluations, maxTokens})`.
-Tests can inject `fetch`; there is no implicit mock mode that could accidentally
-execute real actions using fake judgments.
-
-Questions share state and are independent; batch them when possible. Choice
-selects supplied options. Noul returns a yes probability. Score is a weighted
-position over 2–10 ordered levels, not necessarily 0–1. Confidence is neither
-permission nor verification. Never evaluate model answers as shell code. State
-goes to the selected provider: minimize it, exclude secrets, and obtain consent.
-
-## Limits and output
-
-Program defaults: **60 seconds, 100 evaluations, 100,000 reported tokens**.
-Override with `--timeout-ms`, `--max-evaluations`, and `--max-tokens`. The supervisor
-enforces the deadline outside the native worker, with up to 500 ms cancellation
-grace before killing the worker and registered process groups. An infinite
-synchronous loop cannot disable that supervisor deadline.
-
-One evaluation per client can be in flight. Failed dispatches spend evaluation
-budget. No inference or effect retries are automatic. Token usage arrives after
-inference: the last request can exceed the threshold and still incur charges;
-failed requests may also be billed. This is **not a hard dollar cap**.
-
-Managed shell defaults: eight active processes, 1,000 starts, 32 KiB tail per
-stdout/stderr with truncation flags. The run retains 128 events, each with at
-most 4 KiB data; each process retains 64. Cursor gaps/overflow are explicit.
-These are bounded previews, **not full-output archives**.
-
-Results are JSON; `events --follow` is NDJSON. Program console output is captured
-as events, not mixed into result stdout. CLI errors are JSON on stderr.
-
-| Exit | Meaning |
-| --- | --- |
-| 0 | Command succeeded; `run`/`wait` completed |
-| 1 | Program failed |
-| 2 | CLI/input/transport error or client wait timeout |
-| 3 | Caller attention needed |
-| 124 | Run deadline exceeded |
-| 130 | Run cancelled |
-
-`status`, `events`, and `stop` report command success separately from run state.
-Inspect `state`. Exit zero is not independent goal verification. Cancellation is
-not rollback; inspect uncertain effects instead of blindly replaying them.
-
-## Trust, storage, non-goals
-
-**Native programs run with your OS permissions. This is not a sandbox, approval
-engine, or replacement for your harness's restrictions.** Approving a launch is
-not inspecting every nested effect. Do not launch untrusted programs. Output is
-untrusted data, not instructions.
-
-Storage: `--state-dir`, `JEV_FABRIC_STATE_DIR`, or
-`${XDG_STATE_HOME:-~/.local/state}/jev-fabric`. Private run directories contain
-atomic, owner-readable records. Input, stdin source, output, and explicit evidence
-may be sensitive. There is no general DLP filter or automatic retention cleanup.
-Remove old **terminal** directories per your retention policy; never delete active
-state. A local package install does not modify any agent's configuration.
-
-Records persist; running programs do **not** resume after crashes. Abrupt
-supervisor death can leave orphaned processes and a last-known `running` record.
-`status` is persisted state, not a distributed liveness proof. `wait`/`stop` are
-bounded and never signal a potentially recycled PID to recover an abandoned run.
-Unmanaged native subprocesses or daemonization can escape cleanup/accounting.
-Windows, durable recovery, action replay, exactly-once guarantees, global daemons,
-tool registries, implicit transcript access, and host-specific agent wakeups are
-outside this initial release.
-
-See [architecture](docs/architecture.md) and [acceptance](docs/acceptance.md).
+The shared system npm installation/cache was intentionally not removed.
+No real credentials were accessed during the Bend investigation.

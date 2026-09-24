@@ -1,5 +1,8 @@
 # Architecture
 
+> This describes the TypeScript reference architecture. See the
+> [Bend migration](bend-migration.md) for the current native implementation.
+
 No Pi, Claude, Codex, MCP, browser, or native-app imports are required. The CLI is
 one caller; SDK users may construct `Shell`, `JevClient`, or `runProgram` directly.
 `runProgram` is cooperative/in-process. The CLI adds an external supervisor to
