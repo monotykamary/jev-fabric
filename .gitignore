@@ -1,6 +1,9 @@
 node_modules/
 dist/
 .tmp/
+build/
+.cache/
+.npm/
 .env
 .env.*
 !.env.example

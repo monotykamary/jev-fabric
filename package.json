@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test": "bun run build && node --test dist/tests/*.test.js",
     "demo": "node dist/src/cli.js run examples/pipeline.ts"
   },
   "devDependencies": { "@types/node": "^24.0.0", "typescript": "^6.0.0" }

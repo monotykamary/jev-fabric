@@ -24,12 +24,12 @@ No runtime npm dependencies.
 ## Quickstart
 
 ```sh
-npm ci
-npm run build
+bun install --frozen-lockfile
+bun run build
 node dist/src/cli.js run examples/pipeline.ts
 node dist/src/cli.js run examples/persistent-rpc.ts
 node dist/src/cli.js run examples/monitor.ts
-npm test
+bun run test
 ```
 
 These examples and the test suite are offline: local fixture processes, no model

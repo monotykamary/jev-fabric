@@ -2,7 +2,7 @@
 
 ## Verification
 
-- [ ] `npm test` (offline)
+- [ ] `bun run test` (offline)
 - [ ] Public CLI/API and documentation updated together
 - [ ] No implicit inference, broader authority, retries, or unbounded buffers
 - [ ] Cancellation and uncertain effects addressed
