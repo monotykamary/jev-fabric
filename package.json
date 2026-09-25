@@ -14,6 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:native": "sh scripts/build-native.sh",
     "test:native": "sh scripts/test-native.sh",
+    "check:native-safety": "bun scripts/check-native-safety.ts",
     "test:reference": "bun run build:reference && node --test dist/tests/*.test.js",
     "test": "bun run test:native && bun run test:reference",
     "demo": "sh scripts/build-native.sh && build/jev-fabric -- run 20000 examples/native/pipeline.bend",

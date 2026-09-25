@@ -12,7 +12,7 @@ Nothing is published.
 
 ## Quickstart
 
-Build with **Bend 2.0.27** and Clang. Jev calls additionally require trusted `curl`
+Build with **Bend 2.0.27**, Clang and Bun (for the build-time safety gate). Jev calls additionally require trusted `curl`
 and a working system CA store. Source-program execution requires the toolchain;
 precompiled programs and job controls do not.
 
@@ -68,6 +68,12 @@ reported tokens, not guaranteed billing: the final request can overshoot.
 
 ## Boundaries and verification
 
+Project Bend code contains **no unsafe definitions**. Ten pure policy modules
+and two proof roots check without trust warnings; 22 explicit laws cover selected
+runtime policy properties. Effect drivers retain an explicit foreign-code
+boundary. See [safe Bend and proof coverage](docs/safe-bend.md)—this is not a
+claim of whole-program formal verification.
+
 Trusted native execution is **not a sandbox**. A zero exit means `exited`, not
 verified task completion. Logs are bounded observations, not a lossless protocol;
 no reboot resume, exactly-once execution, or protection from arbitrary native
@@ -77,6 +83,7 @@ code is promised. See the [native API](docs/native-api.md),
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts  # development only
+bun run check:native-safety                   # also enforced by native builds
 bun run test:native
 bun run test:reference                         # needs Node 24+
 bun run demo                                  # native; no model call

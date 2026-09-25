@@ -85,9 +85,11 @@ generated runtime functions excluded and leak detection disabled. That is
 historical evidence, not a blanket sanitizer claim for this expanded rewrite.
 Current checks and live probes belong in the acceptance ledger.
 
-The five proof contracts establish budget exhaustion refusal, terminal
-absorption and conservative next steps for receipts. They do not prove C,
-compiler correctness, TLS security, model semantics or task completion. The old
+The [safe-core refactor](safe-bend.md) eliminates project unsafe definitions and
+checks 22 explicit policy laws across two proof roots. These include budget
+rules, terminal decisions, encoder exhaustion and full-channel non-emission.
+They do not prove C, compiler correctness, TLS security, model semantics or task
+completion. Foreign-dependent drivers retain honest compiler trust warnings. The old
 F32 helpers in Core are policy examples, **not** the wire-security boundary;
 Wire's exact decimal validator is used for every Jev response.
 

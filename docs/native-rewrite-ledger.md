@@ -1,5 +1,9 @@
 # Native rewrite acceptance ledger
 
+This records the original rewrite checkpoint (`1188cbe`). The subsequent no-unsafe
+refactor and its current verification status are tracked in
+[safe-core-ledger.md](safe-core-ledger.md) and [safe-bend.md](safe-bend.md).
+
 Execution path: native CLI → Bend runner / detached worker → owned POSIX process
 scope → private byte capture/spools → Bend UTF-8/JSON/wire validation → explicit
 Jev client → bounded receipt/events. No Node/Bun is in this runtime path.

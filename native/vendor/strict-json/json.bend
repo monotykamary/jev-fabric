@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# Modified for jev-fabric: reject incomplete numbers at delimiters.
+# Modified for jev-fabric: reject incomplete numbers at delimiters;
+# use a structurally decreasing, fuel-bounded encoder (no unsafe definitions).
 # JSON
 # Adapted from H4ad/bend-stdlib/packages/bend-json/json.bend (Apache-2.0;
 # see LICENSE). Packaged separately, without byte wrappers; Unicode decoding,
@@ -218,113 +219,6 @@ type JSON.Job is Data:
   JArr1{xs: List<&2, JSON>}
   JObj0{fs: List<&2, JSON>}
   JObj1{fs: List<&2, JSON>}
-
-@unsafe
-def JSON.encode.go(jobs: List<&2, JSON.Job>, acc: List<&2, String>) -> Result<&1, &1, U32 & String, String>:
-  match jobs:
-    case Nil{}:
-      Done{String.concat(List.reverse(&2, String, acc))}
-    case h <> rest:
-      match h:
-        case JLit{s}:
-          JSON.encode.go(rest, s <> acc)
-        case JVal{v}:
-          match v:
-            case Null{}:
-              JSON.encode.go(rest, "null" <> acc)
-            case Boolean{ok}:
-              JSON.encode.go(rest, Bool.pick(String, ok, "true", "false") <> acc)
-            case Num{+lex}:
-              JSON.encode.number(JSON.read(lex), rest, lex, acc)
-            case Str{text}:
-              JSON.encode.go(rest, JSON.esc(text) <> acc)
-            case Arr{xs}:
-              JSON.encode.go(JArr0{xs} <> JLit{"]"} <> rest, "[" <> acc)
-            case Obj{fields}:
-              JSON.encode.go(JObj0{fields} <> JLit{"}"} <> rest, "{" <> acc)
-            case Member{name, val}:
-              Fail{(22, "member outside an object")}
-        case JArr0{xs}:
-          match xs:
-            case Nil{}:
-              JSON.encode.go(rest, acc)
-            case x <> xt:
-              JSON.encode.go(JVal{x} <> JArr1{xt} <> rest, acc)
-        case JArr1{xs}:
-          match xs:
-            case Nil{}:
-              JSON.encode.go(rest, acc)
-            case x <> xt:
-              JSON.encode.go(JVal{x} <> JArr1{xt} <> rest, "," <> acc)
-        case JObj0{fs}:
-          match fs:
-            case Nil{}:
-              JSON.encode.go(rest, acc)
-            case m <> ft:
-              match m:
-                case Member{name, val}:
-                  JSON.encode.go(JLit{JSON.esc(name) ++ ":"} <> JVal{val} <> JObj1{ft} <> rest,
-                    acc)
-                case Null{}:
-                  Fail{(22, "object field is not a member")}
-                case Boolean{ok}:
-                  Fail{(22, "object field is not a member")}
-                case Num{lex}:
-                  Fail{(22, "object field is not a member")}
-                case Str{text}:
-                  Fail{(22, "object field is not a member")}
-                case Arr{xs}:
-                  Fail{(22, "object field is not a member")}
-                case Obj{fields}:
-                  Fail{(22, "object field is not a member")}
-        case JObj1{fs}:
-          match fs:
-            case Nil{}:
-              JSON.encode.go(rest, acc)
-            case m <> ft:
-              match m:
-                case Member{name, val}:
-                  JSON.encode.go(JLit{JSON.esc(name) ++ ":"} <> JVal{val} <> JObj1{ft} <> rest,
-                    "," <> acc)
-                case Null{}:
-                  Fail{(22, "object field is not a member")}
-                case Boolean{ok}:
-                  Fail{(22, "object field is not a member")}
-                case Num{lex}:
-                  Fail{(22, "object field is not a member")}
-                case Str{text}:
-                  Fail{(22, "object field is not a member")}
-                case Arr{xs}:
-                  Fail{(22, "object field is not a member")}
-                case Obj{fields}:
-                  Fail{(22, "object field is not a member")}
-
-@unsafe
-def JSON.encode.number(parsed: Result<&1, &1, U32 & String, JSON>,
-  rest: List<&2, JSON.Job>, lex: String, acc: List<&2, String>) ->
-  Result<&1, &1, U32 & String, String>:
-  match parsed:
-    case Fail{error}:
-      Fail{(22, "invalid number lexeme")}
-    case Done{value}:
-      match value:
-        case Num{n}:
-          JSON.encode.go(rest, lex <> acc)
-        case Null{}:
-          Fail{(22, "invalid number lexeme")}
-        case Boolean{ok}:
-          Fail{(22, "invalid number lexeme")}
-        case Str{text}:
-          Fail{(22, "invalid number lexeme")}
-        case Arr{items}:
-          Fail{(22, "invalid number lexeme")}
-        case Obj{fields}:
-          Fail{(22, "invalid number lexeme")}
-        case Member{name, val}:
-          Fail{(22, "invalid number lexeme")}
-
-def JSON.write(v: JSON) -> Result<&1, &1, U32 & String, String>:
-  JSON.encode.go([JVal{v}], Nil{})
 
 # Parse
 
@@ -1137,3 +1031,134 @@ def JSON.parse.fin(mode: JSON.Mode) -> Result<&1, &1, U32 & String, JSON>:
 
 def JSON.read(s: String) -> Result<&1, &1, U32 & String, JSON>:
   JSON.parse.fin(JSON.parse.go(s, 0, Walk{MNeed{NVal{}}, []}, False{}))
+
+# Each job expansion is nonrecursive; only the fuel-first driver repeats.
+type JSON.Encoding is Data:
+  Encoding{jobs: List<&2, JSON.Job>, acc: List<&2, String>}
+
+def JSON.encode.number(parsed: Result<&1, &1, U32 & String, JSON>,
+  rest: List<&2, JSON.Job>, lex: String, acc: List<&2, String>) ->
+  Result<&1, &1, U32 & String, JSON.Encoding>:
+  match parsed:
+    case Fail{error}:
+      Fail{(22, "invalid number lexeme")}
+    case Done{value}:
+      match value:
+        case Num{n}:
+          Done{Encoding{rest, lex <> acc}}
+        case Null{}:
+          Fail{(22, "invalid number lexeme")}
+        case Boolean{ok}:
+          Fail{(22, "invalid number lexeme")}
+        case Str{text}:
+          Fail{(22, "invalid number lexeme")}
+        case Arr{items}:
+          Fail{(22, "invalid number lexeme")}
+        case Obj{fields}:
+          Fail{(22, "invalid number lexeme")}
+        case Member{name, val}:
+          Fail{(22, "invalid number lexeme")}
+
+def JSON.encode.step(jobs: List<&2, JSON.Job>, acc: List<&2, String>) -> Result<&1, &1, U32 & String, JSON.Encoding>:
+  match jobs:
+    case Nil{}:
+      Done{Encoding{Nil{}, acc}}
+    case h <> rest:
+      match h:
+        case JLit{s}:
+          Done{Encoding{rest, s <> acc}}
+        case JVal{v}:
+          match v:
+            case Null{}:
+              Done{Encoding{rest, "null" <> acc}}
+            case Boolean{ok}:
+              Done{Encoding{rest, Bool.pick(String, ok, "true", "false") <> acc}}
+            case Num{+lex}:
+              JSON.encode.number(JSON.read(lex), rest, lex, acc)
+            case Str{text}:
+              Done{Encoding{rest, JSON.esc(text) <> acc}}
+            case Arr{xs}:
+              Done{Encoding{JArr0{xs} <> JLit{"]"} <> rest, "[" <> acc}}
+            case Obj{fields}:
+              Done{Encoding{JObj0{fields} <> JLit{"}"} <> rest, "{" <> acc}}
+            case Member{name, val}:
+              Fail{(22, "member outside an object")}
+        case JArr0{xs}:
+          match xs:
+            case Nil{}:
+              Done{Encoding{rest, acc}}
+            case x <> xt:
+              Done{Encoding{JVal{x} <> JArr1{xt} <> rest, acc}}
+        case JArr1{xs}:
+          match xs:
+            case Nil{}:
+              Done{Encoding{rest, acc}}
+            case x <> xt:
+              Done{Encoding{JVal{x} <> JArr1{xt} <> rest, "," <> acc}}
+        case JObj0{fs}:
+          match fs:
+            case Nil{}:
+              Done{Encoding{rest, acc}}
+            case m <> ft:
+              match m:
+                case Member{name, val}:
+                  Done{Encoding{JLit{JSON.esc(name) ++ ":"} <> JVal{val} <> JObj1{ft} <> rest, acc}}
+                case Null{}:
+                  Fail{(22, "object field is not a member")}
+                case Boolean{ok}:
+                  Fail{(22, "object field is not a member")}
+                case Num{lex}:
+                  Fail{(22, "object field is not a member")}
+                case Str{text}:
+                  Fail{(22, "object field is not a member")}
+                case Arr{xs}:
+                  Fail{(22, "object field is not a member")}
+                case Obj{fields}:
+                  Fail{(22, "object field is not a member")}
+        case JObj1{fs}:
+          match fs:
+            case Nil{}:
+              Done{Encoding{rest, acc}}
+            case m <> ft:
+              match m:
+                case Member{name, val}:
+                  Done{Encoding{JLit{JSON.esc(name) ++ ":"} <> JVal{val} <> JObj1{ft} <> rest, "," <> acc}}
+                case Null{}:
+                  Fail{(22, "object field is not a member")}
+                case Boolean{ok}:
+                  Fail{(22, "object field is not a member")}
+                case Num{lex}:
+                  Fail{(22, "object field is not a member")}
+                case Str{text}:
+                  Fail{(22, "object field is not a member")}
+                case Arr{xs}:
+                  Fail{(22, "object field is not a member")}
+                case Obj{fields}:
+                  Fail{(22, "object field is not a member")}
+
+def JSON.encoding.jobs(state: JSON.Encoding) -> List<&2, JSON.Job>:
+  match state:
+    case Encoding{jobs, acc}:
+      jobs
+
+def JSON.encoding.acc(state: JSON.Encoding) -> List<&2, String>:
+  match state:
+    case Encoding{jobs, acc}:
+      acc
+
+def JSON.encode.go(fuel: Nat, jobs: List<&2, JSON.Job>, acc: List<&2, String>) -> Result<&1, &1, U32 & String, String>:
+  match fuel jobs:
+    case _ Nil{}:
+      Done{String.concat(List.reverse(&2, String, acc))}
+    case 0n _:
+      Fail{(22, "JSON encoding work limit")}
+    case 1n+rest pending:
+      do Result<&1, &1, U32 & String, String>:
+        +next : JSON.Encoding <- JSON.encode.step(pending, acc)
+        JSON.encode.go(rest, JSON.encoding.jobs(next), JSON.encoding.acc(next))
+
+def JSON.write_with_fuel(fuel: Nat, v: JSON) -> Result<&1, &1, U32 & String, String>:
+  JSON.encode.go(fuel, [JVal{v}], Nil{})
+
+def JSON.write(v: JSON) -> Result<&1, &1, U32 & String, String>:
+  JSON.write_with_fuel(131072n, v)

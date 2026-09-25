@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "compiler": "bend 2.0.27",
+  "pure": [
+    "native/Core.bend", "native/Json.bend", "native/Codec.bend", "native/Wire.bend",
+    "native/Streams.bend", "native/MonitorCore.bend", "native/HttpCore.bend",
+    "native/CredentialCore.bend", "native/JevCore.bend", "native/vendor/strict-json/json.bend"
+  ],
+  "proofs": ["native/tests/proofs.bend", "native/tests/policy-proofs.bend"],
+  "drivers": [
+    "native/Process.bend", "native/Host.bend", "native/Http.bend", "native/Credentials.bend",
+    "native/Jev.bend", "native/Monitor.bend", "native/Jobs.bend", "native/Session.bend",
+    "native/Runner.bend", "native/Input.bend", "native/main.bend"
+  ],
+  "foreign": {
+    "native/Process.bend": {
+      "Native.exec": "native/posix.c", "Native.capture": "native/posix.c",
+      "Native.pipe": "native/pipe.c", "Native.cancel": "native/posix.c",
+      "Native.exec_logged": "native/posix.c", "Native.exec_pipe": "native/posix.c"
+    },
+    "native/Host.bend": {"jfh_os": "native/host.c", "jfh_spool": "native/host.c"}
+  }
+}

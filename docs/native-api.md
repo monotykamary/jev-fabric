@@ -109,6 +109,18 @@ watch at its deadline does not stop the job; matches are observations, not
 semantic completion. There are no automatic Jev calls or host-agent wakeups.
 Stock Bend IO parking flushes live records; no monitor-specific C is required.
 
+## Pure policy and trust
+
+`MonitorCore`, `HttpCore`, `CredentialCore` and `JevCore` hold the pure policies;
+the original module names remain effectful entrypoints. `Jev.Client` and
+`Jev.Returned` remain public affine type aliases; their constructors live in
+`JevCore`. `Http.post`, `Credentials.resolve` and `Monitor.command` retain their
+interfaces. The pure monitor helpers are now imported from `MonitorCore`.
+
+Every native build checks `native/trust.json`, including transitive pure imports,
+unsafe spellings and proof holes. Pure roots have no trust warnings; foreign IO
+drivers still do. See [exact proof coverage and assumptions](safe-bend.md).
+
 ## Codec.bend and Wire.bend
 
 `Codec.Value() -> Data` aliases the pinned strict JSON AST. `read`, `read_bytes`,

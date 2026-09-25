@@ -1,5 +1,5 @@
 import Base
-import ../Monitor.bend as Monitor
+import ../MonitorCore.bend as Monitor
 import ../Json.bend as Json
 
 def assert(ok: Bool, label: String) -> IO(Unit):

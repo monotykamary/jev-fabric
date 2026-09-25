@@ -72,7 +72,7 @@ test('stdin program, argv errors and explicit handoff exit status', async t => {
   const inline = await command(['run', '-', ...f.args], 'export default async ({shell}) => { const r = await shell.script("printf hello"); return {out:r.stdout}; }');
   assert.equal(inline.code, 0, inline.err); assert.equal(JSON.parse(inline.out).result.out, 'hello');
   const handoff = await command(['run', '-', ...f.args], "export default ({handoff}) => handoff('Need review', {reason:'ambiguous'});");
-  assert.equal(handoff.code, 3); assert.equal(JSON.parse(handoff.out).state, 'needs_attention');
+  assert.equal(handoff.code, 3, handoff.err + handoff.out); assert.equal(JSON.parse(handoff.out).state, 'needs_attention');
   assert.equal((await command(['status', '../../not-a-run', ...f.args])).code, 2);
   assert.equal((await command(['run', f.program, '--timeout-ms', '0', ...f.args])).code, 2);
 });

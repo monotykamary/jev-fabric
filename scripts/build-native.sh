@@ -8,4 +8,5 @@ if [ "$version" != 'bend 2.0.27' ]; then
   exit 1
 fi
 mkdir -p build
+bun scripts/check-native-safety.ts
 bend native/main.bend -o build/jev-fabric
