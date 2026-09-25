@@ -47,6 +47,16 @@ def text_size(value: Result<&1, &1, U32 & String, String>, size: Nat) -> Bool:
     case Fail{e}:
       False{}
 
+# One scalar at each UTF-8 length boundary:
+# U+0000 U+007F U+0080 U+07FF U+0800 U+FFFF U+10000 U+10FFFF.
+def boundary_scalars() -> List<&2, U32>:
+  [
+    0, 127,
+    194, 128, 223, 191,
+    224, 160, 128, 239, 191, 191,
+    240, 144, 128, 128, 244, 143, 191, 191
+  ]
+
 def check(tests: List<&2, Bool>, n: Nat) -> IO(Unit):
   match tests:
     case Nil{}:
@@ -68,7 +78,7 @@ def main() -> IO(Unit):
     text_rejected(Codec.encode(J.Str{String.repeat(SCon{Chr{1}, SNil{}}, 200000n)})),
     text_rejected(Codec.encode(depth(200n))),
     text_rejected(Codec.encode(J.Arr{nodes(20000n)})),
-    text_size(Codec.decode_utf8([0, 127, 194, 128, 223, 191, 224, 160, 128, 239, 191, 191, 240, 144, 128, 128, 244, 143, 191, 191]), 8n),
+    text_size(Codec.decode_utf8(boundary_scalars()), 8n),
     text_rejected(Codec.decode_utf8([224, 159, 191])),
     text_rejected(Codec.decode_utf8([240, 143, 191, 191])),
     text_rejected(Codec.decode_utf8([245, 128, 128, 128])),

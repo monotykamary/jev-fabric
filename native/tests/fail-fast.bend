@@ -1,10 +1,17 @@
 import Base
 import ../Process.bend as Process
 
+# Records its PID in the marker, then sleeps until the native exit reaps it.
+def sleeper(marker: String) -> List<String>:
+  ["/bin/sh", "-c", "printf '%s\\n' \"$$\" > \"$1\"; exec sleep 60", "sh", marker]
+
+def await_marker(marker: String) -> List<String>:
+  ["/bin/sh", "-c", "while [ ! -s \"$1\" ]; do sleep 0.01; done", "sh", marker]
+
 def fail_fast(+marker: String) -> IO(Unit):
   do IO<Unit>:
-    child : Chan(Process.Report) <- IO.fork(Process.Report, Process.run(["/bin/sh", "-c", "printf '%s\\n' \"$$\" > \"$1\"; exec sleep 60", "sh", marker], "", 60000))
-    ready : Process.Report <- Process.run(["/bin/sh", "-c", "while [ ! -s \"$1\" ]; do sleep 0.01; done", "sh", marker], "", 1500)
+    child : Chan(Process.Report) <- IO.fork(Process.Report, Process.run(sleeper(marker), "", 60000))
+    ready : Process.Report <- Process.run(await_marker(marker), "", 1500)
     failure : Process.Report <- Process.run(["/jev-fabric-native-intentionally-missing"], "", 1000)
     IO.die(Unit, 1, "unreachable: missing command should fail")
 

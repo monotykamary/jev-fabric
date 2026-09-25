@@ -33,7 +33,10 @@ def check(tests: List<&2, Bool>, n: Nat) -> IO(Unit):
 def main() -> IO(Unit):
   check([
     ok(Codec.read("null")), ok(Codec.read("[]")), ok(Codec.read("{}")),
-    encoded(roundtrip("{\"n\":-1.2300E+003,\"s\":\"\\uD83D\\uDE42\"}"), "{\"n\":-1.2300E+003,\"s\":\"🙂\"}"),
+    encoded(
+      roundtrip("{\"n\":-1.2300E+003,\"s\":\"\\uD83D\\uDE42\"}"),
+      "{\"n\":-1.2300E+003,\"s\":\"🙂\"}"
+    ),
     Bool.not(ok(Codec.read("[1.]"))), Bool.not(ok(Codec.read("[1e]"))),
     Bool.not(ok(Codec.read("[1e+]"))), Bool.not(ok(Codec.read("[-]"))),
     Bool.not(ok(Codec.read("[01]"))), Bool.not(ok(Codec.read("[true false]"))),
@@ -55,7 +58,13 @@ def main() -> IO(Unit):
     Bool.not(encoded(Codec.encode(J.Num{"1."}), "1.")),
     Bool.not(encoded(Codec.encode(J.Member{"a", J.Null{}}), "")),
     Bool.not(encoded(Codec.encode(J.Obj{[J.Null{}]}), "")),
-    Bool.not(encoded(Codec.encode(J.Obj{[J.Member{"a", J.Null{}}, J.Member{"a", J.Null{}}]}), "")),
-    encoded(roundtrip("[9007199254740993,1e-1000,1.000000000000000001]"), "[9007199254740993,1e-1000,1.000000000000000001]"),
+    Bool.not(encoded(
+      Codec.encode(J.Obj{[J.Member{"a", J.Null{}}, J.Member{"a", J.Null{}}]}),
+      ""
+    )),
+    encoded(
+      roundtrip("[9007199254740993,1e-1000,1.000000000000000001]"),
+      "[9007199254740993,1e-1000,1.000000000000000001]"
+    ),
     encoded(Codec.encode(J.Str{"\n\t\r\"\\"}), "\"\\n\\t\\r\\\"\\\\\"")
   ], 0n)

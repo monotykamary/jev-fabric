@@ -13,7 +13,11 @@ def nl() -> String:
   String.from_list([Chr{10}])
 
 def event(seq: U32, stream: String, text: String, omitted: U32) -> String:
-  "{\"sequence\":" ++ U32.show(seq) ++ ",\"type\":\"process.output\",\"data\":{\"stream\":" ++ Json.quote(stream) ++ ",\"offset\":0,\"bytes\":0,\"omittedBytes\":" ++ U32.show(omitted) ++ ",\"text\":" ++ Json.quote(text) ++ "}}"
+  "{\"sequence\":" ++ U32.show(seq)
+    ++ ",\"type\":\"process.output\",\"data\":{\"stream\":" ++ Json.quote(stream)
+    ++ ",\"offset\":0,\"bytes\":0,\"omittedBytes\":" ++ U32.show(omitted)
+    ++ ",\"text\":" ++ Json.quote(text)
+    ++ "}}"
 
 def summary_lines(value: Monitor.Summary) -> Nat:
   match value:
@@ -63,12 +67,18 @@ def close_ok(value: Maybe<&2, Monitor.Line>) -> Bool:
     case None{}:
       False{}
 
+
+# Feeds raw event rows to a fresh monitor model.
+def watch(raw: List<&2, String>, +literal: String, +batch: Nat) -> Monitor.Step:
+  Monitor.consume(raw, Monitor.initial_model(), literal, batch)
+
 def check_split() -> Bool:
   +a = Monitor.frame_chunk(Monitor.Frame{"", False{}}, "hel", False{}, 100n)
   +b = Monitor.frame_chunk(Monitor.framed_frame(a), "lo" ++ nl() ++ "world" ++ nl(), False{}, 100n)
   +bl = Monitor.framed_lines(b)
-  Bool.and(Nat.is_eq(List.length(&2, Monitor.Line, Monitor.framed_lines(a)), 0n),
-    Bool.and(Nat.is_eq(List.length(&2, Monitor.Line, bl), 2n), String.eq(first_line(bl), "hello")))
+  Nat.is_eq(List.length(&2, Monitor.Line, Monitor.framed_lines(a)), 0n)
+    && Nat.is_eq(List.length(&2, Monitor.Line, bl), 2n)
+    && String.eq(first_line(bl), "hello")
 
 def check_clip() -> Bool:
   +c = Monitor.frame_chunk(Monitor.Frame{"", False{}}, "abcdef" ++ nl(), False{}, 4n)
@@ -79,50 +89,60 @@ def check_close() -> Bool:
   close_ok(Monitor.close_frame(Monitor.Frame{"tail", False{}}))
 
 def check_dedup() -> Bool:
-  +d = Monitor.consume([event(1, "stdout", "X" ++ nl() ++ "X" ++ nl(), 0)], Monitor.initial_model(), "X", 32n)
+  +d = watch([event(1, "stdout", "X" ++ nl() ++ "X" ++ nl(), 0)], "X", 32n)
   Nat.is_eq(step_lines(d), 1n)
 
 def check_split_events() -> Bool:
-  +e = Monitor.consume([event(1, "stdout", "he", 0), event(2, "stdout", "llo" ++ nl(), 0)], Monitor.initial_model(), "he", 32n)
+  +e = watch([event(1, "stdout", "he", 0), event(2, "stdout", "llo" ++ nl(), 0)], "he", 32n)
   Nat.is_eq(step_lines(e), 1n)
 
 def check_filter() -> Bool:
-  +f = Monitor.consume([event(1, "stdout", "alpha" ++ nl() ++ "beta" ++ nl(), 0)], Monitor.initial_model(), "beta", 32n)
+  +f = watch([event(1, "stdout", "alpha" ++ nl() ++ "beta" ++ nl(), 0)], "beta", 32n)
   Nat.is_eq(step_lines(f), 1n)
 
 def check_gap() -> Bool:
-  +g = Monitor.consume([event(5, "stdout", "x" ++ nl(), 0)], Monitor.initial_model(), "x", 32n)
+  +g = watch([event(5, "stdout", "x" ++ nl(), 0)], "x", 32n)
   any_contains(Monitor.step_outs(g), "replay-eviction")
 
 def check_omitted() -> Bool:
-  +h = Monitor.consume([event(1, "stdout", "", 7)], Monitor.initial_model(), "x", 32n)
+  +h = watch([event(1, "stdout", "", 7)], "x", 32n)
   any_contains(Monitor.step_outs(h), "omitted-bytes")
 
 def check_drain() -> Bool:
-  +i = Monitor.consume([event(1, "stdout", "only" ++ nl(), 0)], Monitor.initial_model(), "only", 32n)
+  +i = watch([event(1, "stdout", "only" ++ nl(), 0)], "only", 32n)
   +j = Monitor.drain(Monitor.step_model(i), "only", True{})
   Bool.and(any_contains(Monitor.step_outs(j), "monitor.batch"),
     Bool.not(any_contains(Monitor.step_outs(j), "monitor.end")))
 
 def check_batch() -> Bool:
-  +d = Monitor.consume([event(1, "stdout", "a" ++ nl() ++ "b" ++ nl() ++ "c" ++ nl(), 0)], Monitor.initial_model(), "", 2n)
+  +d = watch([event(1, "stdout", "a" ++ nl() ++ "b" ++ nl() ++ "c" ++ nl(), 0)], "", 2n)
   Bool.and(Nat.is_eq(step_batches(d), 1n), Nat.is_eq(step_lines(d), 3n))
 
 def check_hard_cap() -> Bool:
-  +full : Monitor.Channel = Monitor.Channel{Monitor.Frame{"", False{}}, Monitor.Pending{[], 0n, 0n}, "", 0, 0, 1024n, 32n}
+  +full : Monitor.Channel = Monitor.Channel{
+    Monitor.Frame{"", False{}},
+    Monitor.Pending{[], 0n, 0n},
+    "",
+    0,
+    0,
+    1024n,
+    32n
+  }
   +result = Monitor.push("stdout", full, Monitor.Line{"MATCH", False{}}, 1, "MATCH", 32n)
-  Nat.is_eq(Monitor.channel_count(Monitor.produced_channel(result)), 1024n) && Nat.is_eq(List.length(&2, String, Monitor.produced_outs(result)), 0n)
+  Nat.is_eq(Monitor.channel_count(Monitor.produced_channel(result)), 1024n)
+    && Nat.is_eq(List.length(&2, String, Monitor.produced_outs(result)), 0n)
 
 def all_checks() -> Bool:
-  Bool.and(check_batch(),
-    Bool.and(check_split(),
-    Bool.and(check_clip(),
-      Bool.and(check_close(),
-        Bool.and(check_dedup(),
-          Bool.and(check_split_events(),
-            Bool.and(check_filter(),
-              Bool.and(check_gap(),
-                Bool.and(check_omitted(), check_drain())))))))))
+  check_batch()
+    && check_split()
+    && check_clip()
+    && check_close()
+    && check_dedup()
+    && check_split_events()
+    && check_filter()
+    && check_gap()
+    && check_omitted()
+    && check_drain()
 
 def main() -> IO(Unit):
   do IO<Unit>:

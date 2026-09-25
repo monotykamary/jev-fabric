@@ -4,7 +4,10 @@ import ../Process.bend as Process
 def ok(report: Process.Report, code: U32, text: String) -> Bool:
   match report:
     case Process.Report{actual, timed_out, cancelled, out_cut, err_cut, out, err}:
-      U32.is_eq(actual, code) && String.eq(out, text) && Bool.not(timed_out) && Bool.not(cancelled)
+      U32.is_eq(actual, code)
+        && String.eq(out, text)
+        && Bool.not(timed_out)
+        && Bool.not(cancelled)
 
 def assert(ok: Bool) -> IO(Unit):
   match ok:
@@ -13,12 +16,24 @@ def assert(ok: Bool) -> IO(Unit):
     case True{}:
       IO.pure(Unit, Unit{})
 
+def waits_for_marker(marker: String) -> List<String>:
+  ["/bin/sh", "-c", "while [ ! -f \"$1\" ]; do sleep 0.01; done; printf first", "sh", marker]
+
+def creates_marker(marker: String) -> List<String>:
+  ["/bin/sh", "-c", "printf ready > \"$1\"; printf second", "sh", marker]
+
 def tests(+marker: String) -> IO(Unit):
   do IO<Unit>:
     # If an effect blocks Bend's IO loop, the first process times out before
     # the second can create this marker. No timing benchmark is needed.
-    first : Chan(Process.Report) <- IO.fork(Process.Report, Process.run(["/bin/sh", "-c", "while [ ! -f \"$1\" ]; do sleep 0.01; done; printf first", "sh", marker], "", 1500))
-    second : Chan(Process.Report) <- IO.fork(Process.Report, Process.run(["/bin/sh", "-c", "printf ready > \"$1\"; printf second", "sh", marker], "", 1500))
+    first : Chan(Process.Report) <- IO.fork(
+      Process.Report,
+      Process.run(waits_for_marker(marker), "", 1500)
+    )
+    second : Chan(Process.Report) <- IO.fork(
+      Process.Report,
+      Process.run(creates_marker(marker), "", 1500)
+    )
     a : Process.Report <- IO.join(Process.Report, first)
     b : Process.Report <- IO.join(Process.Report, second)
     assert(ok(a, 0, "first"))

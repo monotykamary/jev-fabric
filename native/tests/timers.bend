@@ -76,11 +76,19 @@ def expired_evaluation(result: Jev.Returned) -> IO(Unit):
     expired_answer(answer)
     IO.print("expired Jev: no reservation")
 
+# Prints its own PID so the test can prove the deadline reaped it.
+def pid_sleeper() -> List<String>:
+  ["/bin/sh", "-c", "printf '%s\\n' \"$$\"; exec sleep 60"]
+
+# Must never launch: the test asserts the marker file stays absent.
+def touch(marker: String) -> List<String>:
+  ["/bin/sh", "-c", "touch \"$1\"", "sh", marker]
+
 def active_session() -> IO(Unit):
   do IO<Unit>:
     budget : Scope.Budget <- Scope.with_timeout(200)
     IO.sleep(80)
-    session : Session.Session <- IO.try(Session.Session, Scope.start(budget, ["/bin/sh", "-c", "printf '%s\\n' \"$$\"; exec sleep 60"]))
+    session : Session.Session <- IO.try(Session.Session, Scope.start(budget, pid_sleeper()))
     report : Process.Report <- IO.try(Process.Report, Session.wait(session))
     IO.print(Process.show(report))
 
@@ -88,14 +96,14 @@ def scope(+marker: String) -> IO(Unit):
   do IO<Unit>:
     +budget : Scope.Budget <- Scope.with_timeout(350)
     IO.sleep(100)
-    first : Process.Report <- Scope.run_for(budget, ["/bin/sh", "-c", "printf '%s\\n' \"$$\"; exec sleep 60"], "", 50)
+    first : Process.Report <- Scope.run_for(budget, pid_sleeper(), "", 50)
     IO.print(Process.show(first))
-    second : Process.Report <- Scope.exec(budget, ["/bin/sh", "-c", "printf '%s\\n' \"$$\"; exec sleep 60"])
+    second : Process.Report <- Scope.exec(budget, pid_sleeper())
     IO.print(Process.show(second))
     IO.sleep(30)
-    third : Process.Report <- Scope.exec(budget, ["/bin/sh", "-c", "touch \"$1\"", "sh", marker])
+    third : Process.Report <- Scope.exec(budget, touch(marker))
     IO.print(Process.show(third))
-    session : Result<&1, &1, Session.Error, Session.Session> <- Scope.start(budget, ["/bin/sh", "-c", "touch \"$1\"", "sh", marker])
+    session : Result<&1, &1, Session.Error, Session.Session> <- Scope.start(budget, touch(marker))
     expired_session(session)
     client : Jev.Client <- IO.try(Jev.Client, Jev.connect(2, 100))
     result : Jev.Returned <- Scope.evaluate(budget, client, "{}")
