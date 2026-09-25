@@ -2,8 +2,9 @@
 
 Native process orchestration with typed Jev decisions, independent of Pi, Codex,
 Claude, or any other harness. Application logic is written in **Bend**; a small
-POSIX bridge owns processes and private files. HTTPS uses system `curl` through
-that same bridge, not another language runtime.
+POSIX bridge owns processes and private files. HTTPS uses the system libcurl
+in-process, keeping connections warm across Jev calls, and falls back to the
+system `curl` executable; no other language runtime is involved.
 
 **The native executable needs neither Node nor Bun.** The preserved TypeScript
 implementation is a [reference](docs/typescript-reference.md), not a dependency.
@@ -12,8 +13,8 @@ Nothing is published.
 
 ## Quickstart
 
-Build with **Bend 2.0.27**, Clang and Bun (for the build-time safety gate). Jev calls additionally require trusted `curl`
-and a working system CA store. Source-program execution requires the toolchain;
+Build with **Bend 2.0.27**, Clang and Bun (for the build-time safety gate). Jev calls additionally require trusted
+system libcurl or `curl` and a working system CA store. Source-program execution requires the toolchain;
 precompiled programs and job controls do not.
 
 ```sh
@@ -71,6 +72,8 @@ Credentials resolve lazily from the provider environment variable or a bounded
 literal argv command. They never enter curl argv or public receipts. HTTPS
 verifies certificates/hostnames, rejects redirects, disables proxy/.curlrc
 configuration, bounds output and time, and never retries automatically.
+Successive calls reuse one pooled TLS connection (`JEV_FABRIC_HTTP=exec` forces
+a fresh `curl` process per request instead).
 Provider responses pass strict JSON/UTF-8 and complete Choice/Noul/Score
 validation; unrecognized response fields are stripped. Budgets bound calls and
 reported tokens, not guaranteed billing: the final request can overshoot.

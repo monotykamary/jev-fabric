@@ -253,9 +253,22 @@ calls with overflow-safe accounting; missing usage counts as zero. The final
 request may still be billed above the token limit. Use call limits as well.
 
 `Http.post` is a lower-level explicit URL API for trusted programs. It validates
-HTTPS, keeps key/body in escaped private stdin config, disables curl startup
-config and proxies, rejects redirects, verifies TLS, and bounds byte capture.
-System curl/CA configuration and PATH remain trusted deployment dependencies.
+HTTPS, disables proxies, rejects redirects, verifies TLS, bounds the response
+to 1 MiB and never retries. `JEV_FABRIC_HTTP` selects the transport:
+
+| Value | Transport |
+| --- | --- |
+| `auto` (default, or unset) | `pooled`, falling back to `exec` only if libcurl cannot be loaded |
+| `pooled` | System libcurl in-process (`native/http.c`). One process-wide share keeps DNS, TLS sessions and connections warm, so later calls skip the TCP/TLS handshake. Fails if libcurl is unavailable |
+| `exec` | A fresh `curl` process per request; key/body travel in escaped private stdin config and curl startup config is disabled |
+
+Any other value fails closed before network access. Both transports honour
+`CURL_CA_BUNDLE` for trust anchors, as the curl tool does. The pooled transport
+keeps the key only in process memory and zeroes its request buffers; the
+connection cache lives as long as the process. Process cancellation (SIGINT,
+SIGTERM, `Process.cancel`) aborts in-flight pooled transfers.
+System libcurl/curl, CA configuration and PATH remain trusted deployment
+dependencies.
 
 ## Durable observations
 

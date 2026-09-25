@@ -20,16 +20,18 @@ exact limits and integrated evidence are tracked in the acceptance ledger.
 
 Stock Bend 2.0.27 has native files, sockets, clocks, channels and concurrent IO,
 but no child-process ownership or HTTPS stack. Pure Bend libraries supply the
-JSON/UTF-8 and typed decision logic; system curl supplies verified TLS over the
-**existing process bridge**, with no custom HTTP/TLS C implementation or compiler
-fork. Research and source links: [native rewrite research](native-rewrite-research.md).
+JSON/UTF-8 and typed decision logic; the system libcurl supplies verified,
+pooled TLS in-process (`native/http.c` only loads and configures it), with the
+system curl executable over the **existing process bridge** as the fallback. There
+is no custom HTTP/TLS implementation or compiler fork. Research and source links: [native rewrite research](native-rewrite-research.md).
 
 `native/posix.c` handles literal argv, POSIX spawn/poll/wait, owned groups,
 cancellable IO, bounded raw capture/spools, signals and descriptor cleanup.
 `native/host.c` handles private no-follow filesystem operations, atomic file
 replacement, random job IDs, advisory ownership leases, self-executable lookup
-and detached spawn. A 26-line `native/pipe.c` supplies owned pipe descriptors.
-Together these are 1126 physical C lines; none parses Jev JSON or decides
+and detached spawn. A 26-line `native/pipe.c` supplies owned pipe descriptors,
+and `native/http.c` (330 lines) drives the system libcurl for pooled HTTPS.
+Together these are 1461 physical C lines; none parses Jev JSON or decides
 application policy.
 
 Bend owns credentials, provider routes, curl config escaping, deadlines/budgets,
@@ -52,8 +54,8 @@ access cannot be dropped merely to minimize line count.
 - Compiler invocations and source programs have an outside deadline. Individual
   in-process IO functions do not bound arbitrary Bend computation unless called
   inside such supervision.
-- System curl, compiler, imported native programs, PATH and CA configuration are
-  trusted. Keys stay out of argv/logs but are accessible to their owning process.
+- System libcurl/curl, compiler, imported native programs, PATH and CA
+  configuration are trusted. Keys stay out of argv/logs but are accessible to their owning process.
 
 ## Toolchain findings retained from the spike
 

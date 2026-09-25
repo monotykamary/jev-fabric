@@ -65,6 +65,11 @@ static void jf_signal(int signal_number) {
   atomic_store_explicit(&jf_interrupt, signal_number, memory_order_relaxed);
 }
 
+// Shared with http.c, which aborts pooled transfers on the same interrupt.
+int jf_interrupted(void) {
+  return atomic_load_explicit(&jf_interrupt, memory_order_relaxed) != 0;
+}
+
 static void jf_cleanup(void) {
   pid_t owned[JF_JOBS];
   pthread_mutex_lock(&jf_gate);

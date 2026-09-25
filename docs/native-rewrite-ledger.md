@@ -50,8 +50,10 @@ Session failure cleanup was exercised 96 times under an fd limit of 64. The
 monitor's hard limit is 1024 lines per stream (2048 combined); a 1024-line
 combined stopping threshold and `outputLimitReached` disclose bounded overshoot.
 
-The custom OS bridge totals **1126 physical C lines** across `posix.c`, `host.c`
-and the 26-line `pipe.c`. HTTP/TLS adds no custom C; system curl is explicit.
+The custom OS bridge totals **1461 physical C lines** across `posix.c`, `host.c`,
+the 26-line `pipe.c` and `http.c`, which loads and configures the system libcurl
+for pooled HTTPS. There is no custom HTTP/TLS implementation; system libcurl and
+the curl executable fallback are explicit.
 Bend owns the application and wire policy. Contour structural review covered the
 JS/TS tests with an advisory fixture-helper branch count; it does not cover or
 certify Bend/C. Those boundaries were inspected and behavior-tested directly.

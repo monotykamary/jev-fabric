@@ -88,6 +88,9 @@ async function run(options: Options = {}) {
   ];
   const env = {
     PATH: `${bin}:/usr/bin:/bin`,
+    // The fake curl above stands in for the network; the pooled libcurl
+    // transport would bypass it, so force the curl executable.
+    JEV_FABRIC_HTTP: 'exec',
     TYPESAFE_API_KEY: options.key ?? secret,
     JEV_PROVIDER: options.provider ?? 'typesafe',
     JEV_MODEL: 'jev-test-model',

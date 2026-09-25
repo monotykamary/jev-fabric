@@ -138,24 +138,73 @@ def request_allowed(
     case True{}:
       Done{Request{config(url, key, body, timeout), timeout}}
 
+# Both transports send only requests that pass this check.
+def valid(+url: String, +key: String, +body: String, +timeout: U32) -> Bool:
+  String.starts_with(url, "https://")
+    && visible(url)
+    && Nat.is_le(String.length(url), 4096n)
+    && key_valid(key)
+    && String.starts_with(body, "{")
+    && no_nul(body)
+    && Nat.is_le(String.length(body), 1048576n)
+    && U32.is_ge(timeout, 1)
+    && U32.is_le(timeout, 3600000)
+
 def request(
   +url: String,
   +key: String,
   +body: String,
   +timeout: U32,
 ) -> Result<&1, &1, U32 & String, Request>:
-  request_allowed(
-    url,
-    key,
-    body,
-    timeout,
-    String.starts_with(url, "https://")
-      && visible(url)
-      && Nat.is_le(String.length(url), 4096n)
-      && key_valid(key)
-      && String.starts_with(body, "{")
-      && no_nul(body)
-      && Nat.is_le(String.length(body), 1048576n)
-      && U32.is_ge(timeout, 1)
-      && U32.is_le(timeout, 3600000),
-  )
+  request_allowed(url, key, body, timeout, valid(url, key, body, timeout))
+
+# ---- Transport selection ----------------------------------------------------
+# `pooled` keeps warm connections through the system libcurl; `exec` runs the
+# curl executable per request; `auto` (the default) prefers pooled and falls
+# back to exec only when libcurl cannot be loaded.
+type Transport is Data:
+  Auto{}
+  Pooled{}
+  Exec{}
+
+def transport(mode: String) -> Result<&1, &1, U32 & String, Transport>:
+  match mode:
+    case "":
+      Done{Auto{}}
+    case "auto":
+      Done{Auto{}}
+    case "pooled":
+      Done{Pooled{}}
+    case "exec":
+      Done{Exec{}}
+    case other:
+      Fail{(1, "JEV_FABRIC_HTTP must be auto, pooled or exec")}
+
+# Pooled transport result: (HTTP status, body bytes in order).
+def Pooled() -> Type:
+  Result<&1, &1, U32 & String, U32 & List<&2, U32>>
+
+# http.c reports this code when libcurl could not be loaded at all.
+def unavailable_code() -> U32:
+  1000000
+
+def pooled_accept(
+  code: U32,
+  bytes: List<&2, U32>,
+  ok: Bool,
+) -> Result<&1, &1, U32 & String, List<&2, U32>>:
+  match ok:
+    case True{}:
+      Done{bytes}
+    case False{}:
+      Fail{(1, "Jev HTTP " ++ U32.show(code) ++ "; no automatic retry")}
+
+# Unlike the curl capture, the body arrives in order with a separate status.
+def pooled_status(+code: U32, bytes: List<&2, U32>) -> Result<&1, &1, U32 & String, List<&2, U32>>:
+  pooled_accept(code, bytes, U32.is_ge(code, 200) && U32.is_lt(code, 300))
+
+def transport_failed() -> Result<&1, &1, U32 & String, List<&2, U32>>:
+  Fail{(1, "Jev transport failed, was interrupted, or exceeded its output bound")}
+
+def unavailable() -> Result<&1, &1, U32 & String, List<&2, U32>>:
+  Fail{(1, "Pooled HTTPS transport unavailable: libcurl could not be loaded")}

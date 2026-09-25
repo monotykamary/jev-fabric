@@ -18,6 +18,7 @@
       "Native.pipe": "native/pipe.c", "Native.cancel": "native/posix.c",
       "Native.exec_logged": "native/posix.c", "Native.exec_pipe": "native/posix.c"
     },
-    "native/Host.bend": {"jfh_os": "native/host.c", "jfh_spool": "native/host.c"}
+    "native/Host.bend": {"jfh_os": "native/host.c", "jfh_spool": "native/host.c"},
+    "native/Http.bend": {"Native.http_post": "native/http.c"}
   }
 }

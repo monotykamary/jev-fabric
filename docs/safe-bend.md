@@ -24,7 +24,9 @@ behavior, of the code generator, or of runtime memory safety.
   `Poll`/`Stop` decisions. `Monitor` interprets them with reads, writes and sleep.
 - `HttpCore` validates inputs and constructs a typed request plan. `Http`
   interprets only successful plans. Curl argv construction has **no inputs**;
-  credentials and bodies are supplied through private stdin, never argv.
+  credentials and bodies are supplied through private stdin, never argv. The
+  pooled libcurl transport receives only requests that pass the same
+  `HttpCore.valid` check, and its status/body mapping is `HttpCore.pooled_status`.
 - `CredentialCore` validates credential output/argv. `Credentials` owns the
   effectful lookup. `JevCore` owns routing, response normalization and budget
   accounting; `Jev` threads an affine client through the external operations.
@@ -37,9 +39,9 @@ behavior, of the code generator, or of runtime memory safety.
   certified by the pure proofs. This is not an assertion that all orchestration
   behavior has been modeled or proved.
 
-The exact eight foreign declarations are allowlisted in `native/trust.json`:
-six in `Process.bend`, two in `Host.bend`. Their implementations total
-1126 physical C lines. IO wrappers still legitimately produce Bend's combined
+The exact nine foreign declarations are allowlisted in `native/trust.json`:
+six in `Process.bend`, two in `Host.bend`, one in `Http.bend`. Their
+implementations total 1461 physical C lines. IO wrappers still legitimately produce Bend's combined
 "unsafe or foreign code" warning; with no project unsafe definitions remaining,
 the project boundary is foreign code. We do not suppress that warning.
 
@@ -122,7 +124,7 @@ native edge probes separately test encoder fuel and request/monitor gates.
 ## Trusted assumptions and limits
 
 Bend's checker, compiler, runtime and Base implementation remain trusted. So do
-the C effects, OS, scheduler, filesystem ownership model, system curl/CA store
+the C effects, OS, scheduler, filesystem ownership model, system libcurl/curl/CA store
 and deployment PATH. Bend cannot prove that a foreign call returns, that a
 clock advances, or that an observed receipt describes reality. Owned-process
 supervision and external deadlines provide operational defenses, not proofs of
