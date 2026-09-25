@@ -17,7 +17,7 @@
     "check:native-safety": "bun scripts/check-native-safety.ts",
     "test:reference": "bun run build:reference && node --test dist/tests/*.test.js",
     "test": "bun run test:native && bun run test:reference",
-    "demo": "sh scripts/build-native.sh && build/jev-fabric -- run 20000 examples/native/pipeline.bend",
+    "demo": "sh scripts/build-native.sh && build/jev-fabric -- run examples/native/pipeline.bend",
     "demo:reference": "node dist/src/cli.js run examples/pipeline.ts"
   },
   "devDependencies": { "@types/node": "^24.0.0", "typescript": "^6.0.0" }

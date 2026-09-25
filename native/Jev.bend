@@ -5,6 +5,7 @@ import ./Wire.bend as Wire
 import ./JevCore.bend as Policy
 import ./Credentials.bend as Credentials
 import ./Http.bend as Http
+import ./Time.bend as Time
 
 # Public affine client/result aliases; constructors and pure logic live in JevCore.
 def Client() -> Type:
@@ -41,6 +42,12 @@ def from_env(timeout_ms: U32, max_evaluations: U32, max_tokens: U32) -> IO(Resul
   do IO<Result<&1, &1, Policy.Error, Policy.Client>>:
     provider : String <- env("JEV_PROVIDER")
     load(Policy.route(provider), timeout_ms, max_evaluations, max_tokens)
+
+# Evaluation/token budgets remain explicit; only the timer gets a default.
+def connect(max_evaluations: U32, max_tokens: U32) -> IO(Result<&1, &1, Policy.Error, Policy.Client>):
+  do IO<Result<&1, &1, Policy.Error, Policy.Client>>:
+    ms : U32 <- Time.jev()
+    from_env(ms, max_evaluations, max_tokens)
 
 def send(+settings: Policy.Settings, reserved: Core.Budget, +key: String, request: Codec.Value, body: String, remaining_ms: U32) -> IO(Policy.Returned):
   do IO<Policy.Returned>:

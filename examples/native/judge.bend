@@ -12,6 +12,6 @@ def show(returned: Jev.Returned) -> IO(Unit):
 # Opt-in: sends only synthetic text. Credentials resolve privately from env/argv.
 def main() -> IO(Unit):
   do IO<Unit>:
-    client : Jev.Client <- IO.try(Jev.Client, Jev.from_env(30000, 1, 10000))
+    client : Jev.Client <- IO.try(Jev.Client, Jev.connect(1, 10000))
     result : Jev.Returned <- Jev.evaluate(client, "{\"state\":\"Synthetic build: 12 tests passed.\",\"questions\":{\"healthy\":{\"type\":\"noul\",\"instructions\":\"Do the observed tests appear healthy?\"}}}")
     show(result)

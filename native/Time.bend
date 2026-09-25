@@ -1,0 +1,31 @@
+import Base
+import ./TimeCore.bend as Policy
+
+def env_value(value: Result<&1, &1, U32 & String, String>) -> String:
+  match value:
+    case Fail{error}:
+      ""
+    case Done{text}:
+      text
+
+def env(name: String) -> IO(String):
+  do IO<String>:
+    value : Result<&1, &1, U32 & String, String> <- IO.get_env(name)
+    return env_value(value)
+
+def setting(name: String, fallback: U32, max: U32) -> IO(U32):
+  do IO<U32>:
+    raw : String <- env(name)
+    IO.pass(U32, Policy.config(raw, fallback, max))
+
+def work() -> IO(U32):
+  setting("JEV_FABRIC_TIMEOUT_MS", Policy.work_default(), 3600000)
+
+def jev() -> IO(U32):
+  setting("JEV_FABRIC_JEV_TIMEOUT_MS", Policy.jev_default(), 3600000)
+
+def wait() -> IO(U32):
+  setting("JEV_FABRIC_WAIT_MS", Policy.wait_default(), 3600000)
+
+def watch() -> IO(U32):
+  setting("JEV_FABRIC_WATCH_MS", Policy.watch_default(), 300000)

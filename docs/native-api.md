@@ -11,16 +11,45 @@ All commands follow `build/jev-fabric --`:
 
 | Command | Meaning |
 | --- | --- |
-| `exec <ms> [--stdin] <command> [args...]` | Literal argv, owned process group, bounded final receipt |
-| `run <ms> <program.bend> [args...]` | Compile into a private directory, then run with inherited stdin; one outside deadline covers both |
+| `exec [--timeout-ms N] [--stdin] [--] <command> [args...]` | Literal argv, owned process group, bounded final receipt |
+| `run [--timeout-ms N] [--] <program.bend> [args...]` | Compile into a private directory, then run with inherited stdin; one outside deadline covers both |
 | `validate <request.json>` | Strict UTF-8/JSON plus typed Jev request validation; no credentials/network |
-| `jev <ms> <request.json> [max-tokens]` | One explicit evaluation; default 100000 reported tokens |
-| `start <ms> <command> [args...]` | Native detached worker; returns private job ID |
+| `jev [--timeout-ms N] <request.json> [max-tokens]` | One explicit evaluation; default 100000 reported tokens |
+| `start [--timeout-ms N] [--] <command> [args...]` | Native detached worker; returns private job ID |
 | `status <id>` | Running state or stable final receipt |
 | `events <id> [after-sequence]` | Snapshot of bounded retained JSONL events |
-| `wait <id> <ms>` | Poll until final receipt or client deadline; timeout returns running state |
+| `wait [--timeout-ms N] <id>` | Poll until final receipt or client deadline; timeout returns running state |
 | `stop <id>` | Idempotent cooperative stop through a private marker, never arbitrary PID signalling |
-| `watch <id> <duration-ms> <literal>` | Live bounded line batches, loss records and a final observation summary; duration 1..300000 ms |
+| `watch [--timeout-ms N] <id> <literal>` | Live bounded line batches, loss records and a final observation summary; duration 1..300000 ms |
+
+Timers may be omitted. Defaults and configuration:
+
+| Operations | Default maximum | Environment override |
+| --- | --- | --- |
+| `exec`, `run`, `start`, timer-free Process/Session APIs, `Scope.open` | 1 hour | `JEV_FABRIC_TIMEOUT_MS` |
+| `jev`, `Jev.connect` | 30 seconds | `JEV_FABRIC_JEV_TIMEOUT_MS` |
+| CLI `wait` | 30 seconds | `JEV_FABRIC_WAIT_MS` |
+| CLI `watch` | 5 seconds | `JEV_FABRIC_WATCH_MS` |
+
+Defaults are ceilings, not sleeps: completion returns immediately. Empty/unset
+configuration uses the default; malformed values fail closed. Explicit limits
+replace configuration for that call (even when that default is malformed).
+`wait` and `watch` only bound observation: they neither cancel nor renew a job.
+The calling harness still has its own shell-tool limits; a CLI default does not
+extend those. Use `start` and subsequent controls for work that should outlive
+a foreground tool call.
+There is no unlimited/zero timeout mode. Limits are 1..3600000 ms, except `watch`
+which permits 1..300000 ms.
+
+Place `--timeout-ms N` and `--stdin` before the executable/source. Parsing stops
+there: all subsequent arguments are literal child arguments, including strings
+such as `--timeout-ms`. A command-local `--` ends option and legacy-number
+parsing: `exec -- 123` executes a numeric command named `123` from PATH. It is
+distinct from the initial Bend runtime `--`.
+
+Legacy forms remain supported: `exec/run/start/jev <ms> ...`,
+`exec <ms> --stdin ...`, `wait <id> <ms>`, `watch <id> <ms> <literal>`.
+Do not specify both a timeout flag and a positional timeout.
 
 Timeouts are 1..3600000 ms. Source compilation consumes the same `run` deadline
 as execution. `run` returns a **process receipt**, not the reference program
@@ -32,8 +61,45 @@ The compiler can read arbitrary native source/imports and run arbitrary native
 code. Private output paths do not make compilation sandboxed. Compiled artifacts
 remain inside the checked storage root and count towards its directory cap.
 
+## Scope.bend: shared deadline budgets
+
+Use `examples/native/scoped.bend` as a complete timer-free composition example.
+
+- `Scope.open() -> IO(Scope.Budget)` starts one configured work budget.
+- `Scope.with_timeout(ms)` explicitly overrides that budget when needed.
+- `Scope.exec(scope, argv)` / `Scope.run(scope, argv, input)` return process reports.
+- `Scope.start(scope, argv) -> IO(Result<..., Session.Session>)` starts a session
+  with the remaining budget. Close/wait the returned handle normally.
+- `Scope.evaluate(scope, client, request)` returns the threaded affine Jev client
+  and evaluation result, like `Jev.evaluate`.
+- `run_for(scope, argv, input, cap_ms)`, `start_for(scope, argv, cap_ms)` and
+  `evaluate_for(scope, client, request, cap_ms)` add optional shorter local caps.
+
+Pass the **same** budget to successive or concurrent calls. Each operation uses
+remaining time, capped by any local limit; Jev additionally retains its client's
+per-request maximum. Creating a new budget for each call defeats this sharing.
+Session reads/writes do not refresh its lifetime. Jev credential acquisition and
+HTTP share the capped request deadline; the original client settings and updated
+credential cache/call accounting are preserved afterward.
+
+Expired process calls return a timed-out report (124) without launching.
+Expired session/evaluation calls return recoverable errors (124); Jev does not
+retrieve credentials, reserve a call or dispatch HTTP in this case.
+
+**A budget is not an isolated resource/cancellation group.** `Process.cancel`
+still cancels the owning executable's entire native process scope. Budgets are
+sampled at dispatch; validation/scheduling/launch latency is not a real-time
+theorem. They are explicitly passed, not ambient: `run`'s external compile/
+execution limit is **not automatically inherited** by a new budget inside the
+program. Cross-process hierarchical cancellation and cleanup after a native
+crash or SIGKILL are not promised. Low-level explicit-time APIs remain available
+to trusted programs. An outer timeout is not proof of cleanup of nested groups.
+
 ## Process.bend
 
+- `Process.exec(argv) -> IO(Process.Report)` uses the configured work default.
+- `Process.exec_input(argv, buffered_stdin)` uses the same default with input.
+- `Process.exec_stdin(argv)` inherits fd 0 with the configured default.
 - `Process.run(argv, buffered_stdin, timeout_ms) -> IO(Process.Report)`
 - `Process.run_stdin(argv, timeout_ms) -> IO(Process.Report)` inherits fd 0.
 - `Process.capture(argv, buffered_stdin, timeout_ms, cap) -> IO(Result<..., RawBytes>)`
@@ -65,7 +131,9 @@ signal handlers are outside the guarantee. Side effects are never rolled back.
 
 ## Session.bend: interactive native handles
 
-- `start(argv, timeout_ms) -> IO(Session)` returns before completion.
+- `open(argv) -> IO(Session)` chooses the configured default once at startup.
+- `start(argv, timeout_ms) -> IO(Session)` explicitly sets that lifetime. Both
+  return before completion; neither refreshes the clock on reads/writes.
 - `write(session, text) -> IO(Session & Result<..., Unit>)` preserves ownership
   even on EPIPE; at most 65536 Unicode characters per write.
 - `close_input(session) -> IO(Session)` sends EOF and is idempotent.
@@ -111,7 +179,8 @@ Stock Bend IO parking flushes live records; no monitor-specific C is required.
 
 ## Pure policy and trust
 
-`MonitorCore`, `HttpCore`, `CredentialCore` and `JevCore` hold the pure policies;
+`TimeCore` and `Cli` hold timer/configuration/argument policy.
+`MonitorCore`, `HttpCore`, `CredentialCore` and `JevCore` hold the other pure policies;
 the original module names remain effectful entrypoints. `Jev.Client` and
 `Jev.Returned` remain public affine type aliases; their constructors live in
 `JevCore`. `Http.post`, `Credentials.resolve` and `Monitor.command` retain their
@@ -149,6 +218,8 @@ Vendoring, patches, license and hashes: `native/vendor/PROVENANCE.md`.
 ## Jev.bend
 
 ```text
+Jev.connect(max_evaluations, max_tokens)
+  -> IO(Result<..., Jev.Client>)  # configured request-time default
 Jev.from_env(timeout_ms, max_evaluations, max_tokens)
   -> IO(Result<..., Jev.Client>)
 Jev.evaluate(client, request_json)

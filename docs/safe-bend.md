@@ -7,8 +7,8 @@ Bend, probes, tests or native examples: neither `@unsafe` nor `def f?` is used.
 Every such module is checked by stock Bend 2.0.27. No proof holes or unimplemented
 laws are permitted. No C, runtime or compiler changes were used to achieve this.
 
-`native/trust.json` declares ten pure production modules, two proof roots and
-eleven effect-driver modules. Each pure module and each proof root must report
+`native/trust.json` declares twelve pure production modules, three proof roots and
+thirteen effect-driver modules. Each pure module and each proof root must report
 exactly **`All terms check.`**. Their transitive project dependencies cannot
 include drivers, foreign imports, or explicit Base IO/handle capabilities.
 
@@ -28,6 +28,10 @@ behavior, of the code generator, or of runtime memory safety.
 - `CredentialCore` validates credential output/argv. `Credentials` owns the
   effectful lookup. `JevCore` owns routing, response normalization and budget
   accounting; `Jev` threads an affine client through the external operations.
+- `TimeCore` owns bounded defaults, integer validation and remaining-budget
+  arithmetic; `Cli` parses prefix options and legacy syntax into typed plans.
+  `Time` resolves environment settings; `Scope` samples the clock and dispatches
+  using the remaining budget, without adding a foreign primitive.
 - The remaining drivers coordinate process/session/job lifecycles, input and
   source compilation. Their foreign-dependent behavior is **conditional**, not
   certified by the pure proofs. This is not an assertion that all orchestration
@@ -82,7 +86,13 @@ unknown receipts require inspection; execution requires verification.
 - reported usage marked oversized returns a disabled client budget;
 - an invalid typed reply remains a sanitized failure.
 
-These are **22 explicit laws**, not 22 proofs of whole modules. In particular,
+`native/tests/time-proofs.bend` adds five definitional policy contracts:
+denied timeout validation remains an error; omitted configuration uses its
+fallback; elapsed time is subtracted rather than renewed; the local cap is
+applied before U32 narrowing; duplicate timeout specifications are rejected.
+These do not prove clock honesty, scheduler latency or process-tree cleanup.
+
+These are **27 explicit laws**, not 27 proofs of whole modules. In particular,
 there is not yet a complete JSON round-trip proof, a general wire-schema
 soundness theorem, an aggregate monitor-size induction, or a proof that actual
 OS processes obey the reported lifecycle. The pure architecture enables further

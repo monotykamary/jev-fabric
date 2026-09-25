@@ -7,6 +7,8 @@ import ./Input.bend as Input
 import ./Codec.bend as Codec
 import ./Wire.bend as Wire
 import ./Jev.bend as Jev
+import ./Cli.bend as Cli
+import ./Time.bend as Time
 
 def finish(code: U32, ok: Bool) -> IO(Unit):
   match ok:
@@ -62,7 +64,7 @@ def validate_file(path: String) -> IO(Unit):
     print_value(value)
 
 def usage() -> IO(Unit):
-  IO.print("jev-fabric native Bend\nusage: build/jev-fabric -- <command>\n  exec <timeout-ms> [--stdin] <command> [args...]\n  run <timeout-ms> <program.bend> [args...]\n  validate <request.json>\n  jev <timeout-ms> <request.json> [max-tokens]\n  start <timeout-ms> <command> [args...]\n  status <id> | events <id> [after-sequence]\n  watch <id> <duration-ms> <literal>\n  wait <id> <wait-timeout-ms> | stop <id>\nNative trusted code, not a sandbox. Shell interpretation is explicit.\nJev uses provider environment credentials or JEV_CREDENTIAL_COMMAND, private curl stdin, and no automatic retries.")
+  IO.print("jev-fabric native Bend\nusage: build/jev-fabric -- <command>\n  exec [--timeout-ms N] [--stdin] [--] <command> [args...]\n  run [--timeout-ms N] [--] <program.bend> [args...]\n  validate <request.json>\n  jev [--timeout-ms N] <request.json> [max-tokens]\n  start [--timeout-ms N] [--] <command> [args...]\n  status <id> | events <id> [after-sequence]\n  watch [--timeout-ms N] <id> <literal>\n  wait [--timeout-ms N] <id> | stop <id>\nDefaults: work 1h, Jev 30s, wait 30s, watch 5s. Timers are ceilings, not delays.\nConfigure JEV_FABRIC_TIMEOUT_MS, JEV_FABRIC_JEV_TIMEOUT_MS, JEV_FABRIC_WAIT_MS, JEV_FABRIC_WATCH_MS.\nLegacy positional milliseconds remain supported. Prefix options stop at the command/file; -- escapes numeric command names.\nNative trusted code, not a sandbox. Shell interpretation is explicit.\nJev uses provider environment credentials or JEV_CREDENTIAL_COMMAND, private curl stdin, and no automatic retries.")
 
 def dispatch(args: List<String>) -> IO(Unit):
   match args:
@@ -89,7 +91,49 @@ def dispatch(args: List<String>) -> IO(Unit):
     case args:
       Jobs.command(args)
 
+def default_timeout(command: String) -> IO(U32):
+  match command:
+    case "jev":
+      Time.jev()
+    case "wait":
+      Time.wait()
+    case "watch":
+      Time.watch()
+    case other:
+      Time.work()
+
+def selected_timeout(command: String, timeout: Maybe<&2, U32>) -> IO(U32):
+  match timeout:
+    case Some{ms}:
+      IO.pure(U32, ms)
+    case None{}:
+      default_timeout(command)
+
+def execute_plan(command: String, args: List<String>, ms: U32, input: Bool) -> IO(Unit):
+  match command:
+    case "exec":
+      execute(args, Some{ms}, input)
+    case other:
+      dispatch(Cli.canonical(other, args, ms, input))
+
+def planned(plan: Cli.Plan) -> IO(Unit):
+  match plan:
+    case Cli.Pass{args}:
+      dispatch(args)
+    case Cli.Timed{+command, args, timeout, input}:
+      do IO<Unit>:
+        ms : U32 <- selected_timeout(command, timeout)
+        execute_plan(command, args, ms, input)
+
+def normalized(result: Result<&1, &1, U32 & String, Cli.Plan>) -> IO(Unit):
+  match result:
+    case Fail{error}:
+      (code, message) = error
+      IO.die(Unit, code, message)
+    case Done{plan}:
+      planned(plan)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    dispatch(args)
+    normalized(Cli.parse(args))

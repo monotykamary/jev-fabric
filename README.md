@@ -19,10 +19,10 @@ precompiled programs and job controls do not.
 ```sh
 sh scripts/build-native.sh                   # or bun run build
 build/jev-fabric -- --help
-build/jev-fabric -- exec 2000 /bin/echo hello
-printf 'native stdin\n' | build/jev-fabric -- exec 2000 --stdin /bin/cat
-build/jev-fabric -- run 20000 examples/native/pipeline.bend
-build/jev-fabric -- run 20000 examples/native/persistent.bend
+build/jev-fabric -- exec /bin/echo hello
+printf 'native stdin\n' | build/jev-fabric -- exec --stdin /bin/cat
+build/jev-fabric -- run examples/native/pipeline.bend
+build/jev-fabric -- run examples/native/persistent.bend
 build/jev-fabric -- validate examples/native/request.json
 ```
 
@@ -30,15 +30,24 @@ The first `--` separates Bend runtime options from application arguments.
 Shell syntax requires an explicitly invoked shell. Compile with `-o`: Bend's
 JavaScript execution mode cannot run our native effects.
 
+**Timers are optional.** Work defaults to a one-hour safety ceiling, Jev to 30
+seconds, `wait` to 30 seconds and `watch` to five seconds. These are maximums,
+not delays. Configure defaults once with `JEV_FABRIC_TIMEOUT_MS`,
+`JEV_FABRIC_JEV_TIMEOUT_MS`, `JEV_FABRIC_WAIT_MS` and `JEV_FABRIC_WATCH_MS`, or
+use a prefix override when needed: `exec --timeout-ms 5000 /bin/echo hello`.
+Existing positional timeouts still work. For composed Bend programs,
+[`Scope.open()` and `Scope.exec`](docs/native-api.md#scopebend-shared-deadline-budgets)
+share one budget across operations; see `examples/native/scoped.bend`.
+
 Background work survives its launcher:
 
 ```sh
-build/jev-fabric -- start 30000 /bin/sh -c 'printf "ready\n"; sleep 10'
+build/jev-fabric -- start /bin/sh -c 'printf "ready\n"; sleep 10'
 # Use the returned ID:
 build/jev-fabric -- status <id>
 build/jev-fabric -- events <id>                 # bounded JSONL replay
-build/jev-fabric -- watch <id> 5000 ready       # live filtered line batches
-build/jev-fabric -- wait <id> 1000              # wait does not cancel the job
+build/jev-fabric -- watch <id> ready            # live filtered line batches
+build/jev-fabric -- wait <id>                   # wait does not cancel the job
 build/jev-fabric -- stop <id>
 ```
 
@@ -55,7 +64,7 @@ No output automatically triggers a model call. Native programs import
 # Opt-in network request; only the synthetic example is sent.
 export JEV_PROVIDER=typesafe
 export JEV_CREDENTIAL_COMMAND='["localterm","secret","get","typesafe_api_key"]'
-build/jev-fabric -- jev 30000 examples/native/request.json 10000
+build/jev-fabric -- jev examples/native/request.json 10000
 ```
 
 Credentials resolve lazily from the provider environment variable or a bounded
@@ -68,8 +77,8 @@ reported tokens, not guaranteed billing: the final request can overshoot.
 
 ## Boundaries and verification
 
-Project Bend code contains **no unsafe definitions**. Ten pure policy modules
-and two proof roots check without trust warnings; 22 explicit laws cover selected
+Project Bend code contains **no unsafe definitions**. Twelve pure policy modules
+and three proof roots check without trust warnings; 27 explicit laws cover selected
 runtime policy properties. Effect drivers retain an explicit foreign-code
 boundary. See [safe Bend and proof coverage](docs/safe-bend.md)—this is not a
 claim of whole-program formal verification.

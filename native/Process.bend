@@ -1,5 +1,6 @@
 import Base
 import ./Json.bend as Json
+import ./Time.bend as Time
 
 def Raw() -> Type:
   U32 & (U32 & (String & String))
@@ -44,10 +45,25 @@ def run(argv: List<String>, input: String, timeout_ms: U32) -> IO(Report):
     raw : Raw <- IO.try(Raw, Native.exec(argv, input, timeout_ms, False{}))
     return decode(raw)
 
+# Timer-free convenience; use run for an explicit local override.
+def exec_input(argv: List<String>, input: String) -> IO(Report):
+  do IO<Report>:
+    ms : U32 <- Time.work()
+    run(argv, input, ms)
+
+def exec(argv: List<String>) -> IO(Report):
+  exec_input(argv, "")
+
 def run_stdin(argv: List<String>, timeout_ms: U32) -> IO(Report):
   do IO<Report>:
     raw : Raw <- IO.try(Raw, Native.exec(argv, "", timeout_ms, True{}))
     return decode(raw)
+
+def exec_stdin(argv: List<String>) -> IO(Report):
+  do IO<Report>:
+    ms : U32 <- Time.work()
+    run_stdin(argv, ms)
+
 
 # Spool the first 1 MiB per stream to owned regular files; retain bounded final tails.
 # Both file handles are consumed and closed by the effect, including failure paths.

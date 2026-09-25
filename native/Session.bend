@@ -1,6 +1,7 @@
 import Base
 import ./Process.bend as Process
 import ./Host.bend as Host
+import ./Time.bend as Time
 
 def Error() -> Type:
   U32 & String
@@ -47,6 +48,12 @@ def start(argv: List<String>, timeout: U32) -> IO(Session):
     err_read : File <- Host.spool(id, "stderr.bin", False{})
     pair : File & File <- IO.try(File & File, Process.pipe())
     opened(pair, argv, timeout, out, err, out_read, err_read)
+
+# Choose a lifetime once; writes and reads never renew it.
+def open(argv: List<String>) -> IO(Session):
+  do IO<Session>:
+    ms : U32 <- Time.work()
+    start(argv, ms)
 
 def wrote(pair: File & Written) -> Maybe<&1, File> & Written:
   (file, result) = pair

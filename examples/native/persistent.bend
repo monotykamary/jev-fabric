@@ -17,7 +17,7 @@ def send(session: Session.Session, text: String) -> IO(Session.Session):
 # Protocol clients should correlate/validate replies and stay below spool limits.
 def main() -> IO(Unit):
   do IO<Unit>:
-    first : Session.Session <- Session.start(["/bin/sh", "-c", "i=0; while IFS= read -r value; do i=$((i+1)); printf '{\"count\":%s,\"value\":%s}\\n' \"$i\" \"$value\"; done"], 3000)
+    first : Session.Session <- Session.open(["/bin/sh", "-c", "i=0; while IFS= read -r value; do i=$((i+1)); printf '{\"count\":%s,\"value\":%s}\\n' \"$i\" \"$value\"; done"])
     second : Session.Session <- send(first, "10\n")
     third : Session.Session <- send(second, "20\n")
     fourth : Session.Session <- send(third, "30\n")
