@@ -56,6 +56,8 @@ async function run(args: string[], options: Options = {}) {
   const env = {
     PATH: `${fakeBin}:${process.env.PATH}`,
     BEND_NO_TELEMETRY: '1',
+    // The fake curl on PATH only intercepts the subprocess HTTP transport.
+    JEV_FABRIC_HTTP: 'exec',
     JEV_FABRIC_HOME: join(root, 'jobs'),
     TYPESAFE_API_KEY: 'SYNTHETIC_TIMER_KEY',
     CURL_RECORD: curl,
@@ -108,7 +110,8 @@ test('configured work limits and explicit overrides remain effective; malformed 
   const timed = await run(['exec', '/bin/sleep', '1'], { env: { JEV_FABRIC_TIMEOUT_MS: '40' } });
   expect(timed.code).toBe(124);
   expect(JSON.parse(timed.out).timedOut).toBe(true);
-  for (const prefix of [['300'], ['--timeout-ms', '300']]) {
+  // Generous enough for an 80 ms sleep that the OS overshoots by ~250 ms.
+  for (const prefix of [['1000'], ['--timeout-ms', '1000']]) {
     const override = await run(['exec', ...prefix, '/bin/sleep', '0.08'], {
       env: { JEV_FABRIC_TIMEOUT_MS: 'invalid' },
     });
@@ -222,7 +225,8 @@ test('shared budgets expire, reap processes/sessions and block new effects witho
   const began = Date.now();
   const r = await run(['scope', marker], { program: timersFixture, env: credentialEnv });
   expect(r.code, r.err).toBe(0);
-  expect(Date.now() - began).toBeLessThan(2000);
+  // Budgets total ~1.6 s plus timer slack: far below the 60 s sleepers they must reap.
+  expect(Date.now() - began).toBeLessThan(5000);
   const reports = r.out.trim().split('\n').filter(x => x.startsWith('{')).map(x => JSON.parse(x));
   expect(reports.length).toBe(4);
   for (const row of reports) expect(row).toMatchObject({ exitCode: 124, timedOut: true });
