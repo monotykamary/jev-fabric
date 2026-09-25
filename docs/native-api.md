@@ -271,7 +271,10 @@ Each job retains 64 events, at most two 1 MiB first-byte raw spools, and final
 32 KiB tails. Output previews coalesce to the latest 2048 available bytes per
 stream/tick, reporting `offset`, `bytes`, `omittedBytes`, and decoded `text`.
 UTF-8 partial characters carry across adjacent chunks and reset across loss.
-`process.spool_limit` discloses the hard spool cap. Cursors are monotonically
+`process.spool_limit` discloses the hard spool cap. The worker atomically rewrites
+the event file at most every four 25 ms ticks: new events after an idle period
+publish on the next tick, continuous output publishes about every 100 ms, and
+the final replay is written before the receipt. Cursors are monotonically
 increasing within a job; if the first returned sequence skips your cursor,
 older events were evicted. `events` is a snapshot, not a lossless subscriber.
 A recovered crash receipt does not synthesize a missing final replay event.

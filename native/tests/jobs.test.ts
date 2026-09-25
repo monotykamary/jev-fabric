@@ -181,6 +181,38 @@ describe('durable native command jobs', () => {
     for (let i = 1; i < xs.length; i++) expect(xs[i].sequence).toBe(xs[i - 1].sequence + 1);
   }, 30000);
 
+  test('continuous output keeps publishing live snapshots whose chunks match the spool', async () => {
+    const script = 'i=0; while [ "$i" -lt 60 ]; do printf "line %s\\n" "$i"; /bin/sleep 0.02; '
+      + 'i=$((i+1)); done';
+    const id = await start(['/bin/sh', '-c', script], 20000);
+    const live = new Set<number>();
+    for (let i = 0; i < 300 && live.size < 3; i++) {
+      const xs = await events(id);
+      if (xs.some(e => e.type === 'job.finished')) break;
+      live.add(xs.at(-1).sequence);
+      await Bun.sleep(20);
+    }
+    expect(live.size).toBeGreaterThanOrEqual(3);
+    expect((await wait(id, 20000)).state).toBe('exited');
+    const dir = join(root, id);
+    const replay = await command(['events', id]);
+    expect(replay.stdout).toBe(readFileSync(join(dir, 'events.jsonl'), 'utf8'));
+    const xs = jsonLines(replay.stdout);
+    expect(xs.length).toBeLessThanOrEqual(64);
+    for (let i = 1; i < xs.length; i++) expect(xs[i].sequence).toBe(xs[i - 1].sequence + 1);
+    expect(xs.at(-1).type).toBe('job.finished');
+    const spool = readFileSync(join(dir, 'stdout.bin'), 'utf8');
+    const chunks = xs.filter(e => e.type === 'process.output' && e.data.stream === 'stdout');
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const { data } of chunks) {
+      expect(data.text).toBe(spool.slice(data.offset, data.offset + data.bytes));
+    }
+    for (let i = 1; i < chunks.length; i++) {
+      const [before, after] = [chunks[i - 1].data, chunks[i].data];
+      expect(after.offset).toBe(before.offset + before.bytes + after.omittedBytes);
+    }
+  }, 30000);
+
   test('split UTF-8 survives multiple live reads; partial EOF and malformed bytes are explicit replacement text', async () => {
     // U+1F642 split across two writes, then a truncated lead pair at EOF.
     const script = "printf '\\360\\237'; /bin/sleep 0.15; printf '\\231\\202'; "
