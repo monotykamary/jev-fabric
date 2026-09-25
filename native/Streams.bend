@@ -8,18 +8,31 @@ type Decoder is Data:
 def empty() -> Decoder:
   Decoder{0, 0, 0, ""}
 
+# U+FFFD, emitted in place of each invalid or truncated sequence.
+def replacement() -> U32:
+  65533
+
+# Any code point except UTF-16 surrogates (U+D800..U+DFFF).
 def scalar(+code: U32) -> Bool:
   U32.is_le(code, 1114111) && Bool.not(U32.is_ge(code, 55296) && U32.is_le(code, 57343))
 
-def lead(b: U32, text: String, valid: Bool) -> Decoder:
+# A lead byte below 224 starts a 2-byte sequence, below 240 a 3-byte one, else 4 bytes.
+# Each keeps its payload bits and the smallest scalar that sequence length may encode.
+def sequence(+byte: U32, two: Bool, three: Bool, text: String) -> Decoder:
+  match two three:
+    case True{} _:
+      Decoder{1, U32.mod(byte, 32), 128, text}
+    case False{} True{}:
+      Decoder{2, U32.mod(byte, 16), 2048, text}
+    case False{} False{}:
+      Decoder{3, U32.mod(byte, 8), 65536, text}
+
+def lead(+b: U32, text: String, valid: Bool) -> Decoder:
   match valid:
     case False{}:
-      Decoder{0, 0, 0, SCon{Chr{65533}, text}}
+      Decoder{0, 0, 0, SCon{Chr{replacement()}, text}}
     case True{}:
-      +byte = b
-      Decoder{Bool.pick(U32, U32.is_lt(byte, 224), 1, Bool.pick(U32, U32.is_lt(byte, 240), 2, 3)),
-        U32.mod(byte, Bool.pick(U32, U32.is_lt(byte, 224), 32, Bool.pick(U32, U32.is_lt(byte, 240), 16, 8))),
-        Bool.pick(U32, U32.is_lt(byte, 224), 128, Bool.pick(U32, U32.is_lt(byte, 240), 2048, 65536)), text}
+      sequence(b, U32.is_lt(b, 224), U32.is_lt(b, 240), text)
 
 def begin(+b: U32, text: String, ascii: Bool) -> Decoder:
   match ascii:
@@ -33,14 +46,23 @@ def complete(need: U32, +code: U32, +minimum: U32, text: String, last: Bool) -> 
     case False{}:
       Decoder{need, code, minimum, text}
     case True{}:
-      Decoder{0, 0, 0, SCon{Chr{Bool.pick(U32, U32.is_ge(code, minimum) && scalar(code), code, 65533)}, text}}
+      canonical = U32.is_ge(code, minimum) && scalar(code)
+      Decoder{0, 0, 0, SCon{Chr{Bool.pick(U32, canonical, code, replacement())}, text}}
 
-def continuation(+need: U32, code: U32, minimum: U32, text: String, +b: U32, valid: Bool) -> Decoder:
+def continuation(
+  +need: U32,
+  code: U32,
+  minimum: U32,
+  text: String,
+  +b: U32,
+  valid: Bool,
+) -> Decoder:
   match valid:
     case False{}:
-      begin(b, SCon{Chr{65533}, text}, U32.is_lt(b, 128))
+      begin(b, SCon{Chr{replacement()}, text}, U32.is_lt(b, 128))
     case True{}:
-      complete(U32.sub(need, 1), U32.add(U32.mul(code, 64), U32.sub(b, 128)), minimum, text, U32.is_eq(need, 1))
+      extended = U32.add(U32.mul(code, 64), U32.sub(b, 128))
+      complete(U32.sub(need, 1), extended, minimum, text, U32.is_eq(need, 1))
 
 def step(decoder: Decoder, +b: U32) -> Decoder:
   match decoder:
@@ -66,4 +88,4 @@ def finish(decoder: Decoder) -> String:
     case Decoder{0, code, minimum, text}:
       String.reverse(text)
     case Decoder{need, code, minimum, text}:
-      String.reverse(SCon{Chr{65533}, text})
+      String.reverse(SCon{Chr{replacement()}, text})

@@ -38,8 +38,12 @@ def captured(result: Result<&1, &1, Error, Http.RawBytes>) -> Result<&1, &1, Err
       (code, (flags, (bytes, err))) = raw
       output(bytes, U32.is_eq(code, 0) && U32.is_eq(flags, 0))
 
-def argv_text(v: Maybe<&2, String>, acc: List<String>, rest: List<String> -> Result<&1, &1, Error, List<String>>) -> Result<&1, &1, Error, List<String>>:
-  match v:
+def argv_text(
+  text: Maybe<&2, String>,
+  acc: List<String>,
+  rest: List<String> -> Result<&1, &1, Error, List<String>>,
+) -> Result<&1, &1, Error, List<String>>:
+  match text:
     case None{}:
       Fail{(1, "Credential command must be a JSON argv array")}
     case Some{s}:
