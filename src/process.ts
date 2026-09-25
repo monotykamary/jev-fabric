@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventBus, Queue } from './events.js';
 import { LineFramer, Monitor, type MonitorOptions } from './monitor.js';
+import { ByteTail, OUTPUT_FLUSH_MS, OutputBatch, type OutputStream } from './output.js';
 import { integer, killGroup, message } from './util.js';
 import type { FabricEvent } from './types.js';
 
@@ -36,8 +37,6 @@ export interface ShellOptions {
 const TAIL_BYTES = 32768;
 const MAX_WRITE_BYTES = 1048576;
 const PROCESS_EVENT_CAPACITY = 64;
-const OUTPUT_PREVIEW_CHARS = 512;
-const OUTPUT_FLUSH_MS = 100;
 const KILL_GRACE_MS = 250;
 const MAX_COMMAND_LABEL = 256;
 const DEFAULT_MONITOR_LIFETIME_MS = 300000;
@@ -48,19 +47,7 @@ const DEFAULT_MAX_CONCURRENT = 8;
 const MAX_CONCURRENT_LIMIT = 64;
 const DEFAULT_MAX_STARTS = 1000;
 
-type Stream = 'stdout' | 'stderr';
 type StopState = 'cancelled' | 'timed_out';
-
-class Tail {
-  private buffer = Buffer.alloc(0);
-  truncated = false;
-  append(chunk: Buffer): void {
-    const next = Buffer.concat([this.buffer, chunk]);
-    this.truncated ||= next.length > TAIL_BYTES;
-    this.buffer = next.subarray(Math.max(0, next.length - TAIL_BYTES));
-  }
-  text(): string { return this.buffer.toString('utf8'); }
-}
 
 function hasNul(text: string): boolean {
   return text.includes('\0');
@@ -103,14 +90,14 @@ export class ManagedProcess {
   readonly id = randomUUID();
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly bus = new EventBus(PROCESS_EVENT_CAPACITY);
-  private readonly out = new Tail();
-  private readonly err = new Tail();
+  private readonly out = new ByteTail(TAIL_BYTES);
+  private readonly err = new ByteTail(TAIL_BYTES);
   private readonly monitor: Monitor | undefined;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly done: Promise<ProcessResult>;
   private finished = false;
   private stopping: StopState | undefined;
-  private readonly pending = { stdout: { text: '', bytes: 0 }, stderr: { text: '', bytes: 0 } };
+  private readonly output = new OutputBatch();
   private outputTimer: ReturnType<typeof setTimeout> | undefined;
   private readers = 0;
   private failure: string | undefined;
@@ -193,13 +180,11 @@ export class ManagedProcess {
       this.stop();
     }
   }
-  private capture(stream: Stream, chunk: Buffer): void {
+  private capture(stream: OutputStream, chunk: Buffer): void {
     (stream === 'stdout' ? this.out : this.err).append(chunk);
     // Monitor stdout only, so stderr chunks cannot splice into a protocol line.
     if (stream === 'stdout') this.monitor?.framer.append(chunk);
-    const pending = this.pending[stream];
-    pending.bytes += chunk.length;
-    pending.text = (pending.text + chunk.toString('utf8')).slice(-OUTPUT_PREVIEW_CHARS);
+    this.output.append(stream, chunk);
     if (!this.outputTimer) {
       this.outputTimer = setTimeout(() => {
         this.outputTimer = undefined;
@@ -208,15 +193,7 @@ export class ManagedProcess {
     }
   }
   private flushOutput(): void {
-    for (const stream of ['stdout', 'stderr'] as const) {
-      const pending = this.pending[stream];
-      if (pending.bytes) {
-        const truncated = pending.bytes > Buffer.byteLength(pending.text);
-        this.emit('process.output', { stream, text: pending.text, bytes: pending.bytes, truncated });
-      }
-      pending.text = '';
-      pending.bytes = 0;
-    }
+    this.output.flush(preview => this.emit('process.output', preview));
   }
   events(after = 0): Queue<FabricEvent> { return this.bus.subscribe(after); }
   wait(): Promise<ProcessResult> { return this.done; }

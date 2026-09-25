@@ -3,6 +3,7 @@ import { existsSync, watch, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EventBus } from './events.js';
+import { OUTPUT_FLUSH_MS, OutputBatch } from './output.js';
 import type { ProgramOutcome } from './program.js';
 import { atomic, readPlan } from './store.js';
 import type { FabricEvent, RunPlan, RunRecord } from './types.js';
@@ -11,8 +12,6 @@ import { asJson, killGroup, message } from './util.js';
 const RUN_EVENT_CAPACITY = 128;
 const PERSIST_DEBOUNCE_MS = 25;
 const CANCEL_GRACE_MS = 500;
-const OUTPUT_FLUSH_MS = 100;
-const OUTPUT_PREVIEW_CHARS = 512;
 const MAX_EVENT_DATA_BYTES = 4096;
 const READINESS_TIMEOUT_MS = 10000;
 
@@ -100,25 +99,11 @@ export async function supervise(plan: RunPlan, signal?: AbortSignal, ready?: () 
   signal?.addEventListener('abort', abort, { once: true });
   deadline = setTimeout(() => cancel('timed_out'), plan.timeoutMs);
 
-  const output = { stdout: { text: '', bytes: 0 }, stderr: { text: '', bytes: 0 } };
-  const flushOutput = () => {
-    for (const stream of ['stdout', 'stderr'] as const) {
-      const batch = output[stream];
-      if (batch.bytes) {
-        const truncated = batch.bytes > Buffer.byteLength(batch.text);
-        emit('program.output', { stream, text: batch.text, bytes: batch.bytes, truncated });
-      }
-      batch.text = '';
-      batch.bytes = 0;
-    }
-  };
+  const output = new OutputBatch();
+  const flushOutput = () => output.flush(preview => emit('program.output', preview));
   const outputTimer = setInterval(flushOutput, OUTPUT_FLUSH_MS);
   for (const stream of ['stdout', 'stderr'] as const) {
-    worker[stream]!.on('data', (chunk: Buffer) => {
-      const batch = output[stream];
-      batch.text = (batch.text + chunk.toString('utf8')).slice(-OUTPUT_PREVIEW_CHARS);
-      batch.bytes += chunk.length;
-    });
+    worker[stream]!.on('data', (chunk: Buffer) => output.append(stream, chunk));
   }
 
   const recordUsage = (stats: UsageStats) => {
