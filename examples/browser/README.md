@@ -6,8 +6,9 @@
 observes the page's candidates and prints one Jev request, in the style of
 [jev-ultrafast](https://github.com/browser-use/jev-ultrafast):
 
-- `operation`: click, type, press_enter, done or blocked (only what the page allows)
-- `click_target` / `type_target`: speculative targets among observed candidates
+- `operation`: click, type, press_enter, scroll_down/up, done or blocked (only what the page allows)
+- `click_target` / `type_target` / `scroll_target`: speculative targets among observed candidates,
+  each described with its role, name, state and named context (for example `in dialog: Departure`)
 - `type_text`: which word span of the goal to type, so no text model is needed
 
 All heads are answered in one round trip; `examples/native/browse.bend` makes the
@@ -21,7 +22,7 @@ export JEV_PROVIDER=typesafe TYPESAFE_API_KEY=...     # or JEV_CREDENTIAL_COMMAN
 jev-fabric -- run examples/native/browse.bend          # Wikipedia: Gödel's incompleteness theorems
 
 BROWSE_URL='https://www.google.com/travel/flights?hl=en' \
-BROWSE_GOAL='Find one-way flights from Zurich to London on September 20, 2026, for one adult in economy.' \
+BROWSE_GOAL='Find one-way flights from Zurich to London on October 20, 2026, for one adult in economy.' \
 BROWSE_STEPS=25 jev-fabric -- run examples/native/browse.bend
 ```
 

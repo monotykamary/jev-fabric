@@ -26,7 +26,17 @@ const SETTLE_MS = 1500;
 const TRACE = process.env.BROWSE_TRACE;
 const trace = (entry: unknown) => { if (TRACE) appendFileSync(TRACE, JSON.stringify(entry) + '\n'); };
 
-type Candidate = { id: string; role: string; label: string; operations: string[]; value?: string; expanded?: boolean; checked?: boolean; selected?: boolean };
+type Candidate = {
+  id: string;
+  role: string;
+  label: string;
+  operations: string[];
+  value?: string;
+  expanded?: boolean;
+  checked?: boolean;
+  selected?: boolean;
+  context?: string;
+};
 type Observation = { observationId: string; revision: string; candidates: Candidate[]; url: string; title: string; scope: { sessionId: string } };
 
 const emit = (message: unknown) => process.stdout.write(JSON.stringify(message) + '\n');
@@ -85,13 +95,14 @@ function describe(c: Candidate): string {
   if (c.expanded !== undefined) parts.push(c.expanded ? 'expanded' : 'collapsed');
   if (c.checked !== undefined) parts.push(c.checked ? 'checked' : 'unchecked');
   if (c.selected) parts.push('selected');
+  if (c.context) parts.push(`in ${c.context}`);
   return parts.join(', ');
 }
 
-function targets(seen: Observation, operation: string): Record<string, string> {
+function targets(seen: Observation, ...operations: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   seen.candidates.forEach((candidate, index) => {
-    if (candidate.operations.includes(operation)) out[String(index + 1)] = describe(candidate);
+    if (operations.some(op => candidate.operations.includes(op))) out[String(index + 1)] = describe(candidate);
   });
   return out;
 }
@@ -99,18 +110,25 @@ function targets(seen: Observation, operation: string): Record<string, string> {
 function request(seen: Observation, history: string[], spans: string[]) {
   const clickable = targets(seen, 'click');
   const typable = targets(seen, 'type');
+  const scrollable = targets(seen, 'scroll_down', 'scroll_up');
   const operations: Record<string, string> = {};
   if (Object.keys(clickable).length) operations.click = 'Click one of the listed elements.';
   if (Object.keys(typable).length) {
     operations.type = 'Replace the text in a field with text from the goal.';
     operations.press_enter = 'Press Enter in a field, for example to submit a search already typed.';
   }
+  if (Object.keys(scrollable).length) {
+    operations.scroll_down = 'Scroll the page or a list down to reveal more of it.';
+    operations.scroll_up = 'Scroll the page or a list back up.';
+  }
   operations.done = 'The current page already shows what the goal asks for.';
   operations.blocked = 'The goal cannot be completed from here.';
   const questions: Record<string, unknown> = {
     operation: {
       type: 'choice',
-      instructions: 'Choose the next operation that makes the most progress toward the goal. Do not repeat an action that already failed.',
+      instructions: 'Choose the next operation that makes the most progress toward the goal. Before submitting a form or ' +
+        'choosing done, check that every detail the goal specifies (options, places, dates, counts) is already set ' +
+        'on the page, and fix any that are not. Do not repeat an action that already failed.',
       criteria: operations,
     },
   };
@@ -126,6 +144,9 @@ function request(seen: Observation, history: string[], spans: string[]) {
       instructions: 'If typing, which exact text from the goal belongs in that field?',
       criteria: Object.fromEntries(spans.map(span => [span, null])),
     };
+  }
+  if (Object.keys(scrollable).length) {
+    questions.scroll_target = { type: 'choice', instructions: 'If scrolling, what should scroll?', criteria: scrollable };
   }
   return {
     state: {
@@ -243,6 +264,8 @@ async function main() {
         const text = choice(answers, 'type_text') ?? '';
         result = await actOn(choice(answers, 'type_target'), { operation: 'type', text });
         result = `typed "${text}": ${result}`;
+      } else if (operation === 'scroll_down' || operation === 'scroll_up') {
+        result = await actOn(choice(answers, 'scroll_target'), { operation });
       } else if (operation === 'press_enter') {
         result = await actOn(choice(answers, 'type_target'), { operation: 'press', key: 'Enter' });
       } else {
