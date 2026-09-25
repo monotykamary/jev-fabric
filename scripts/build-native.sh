@@ -2,9 +2,13 @@
 set -eu
 export BEND_NO_TELEMETRY=1
 cd "$(dirname "$0")/.."
-version=$(bend version) || { printf '%s\n' 'Bend could not run; verify the compiler installation.' >&2; exit 1; }
+version=$(bend version) || {
+  printf '%s\n' 'Bend could not run; verify the compiler installation.' >&2
+  exit 1
+}
 if [ "$version" != 'bend 2.0.27' ]; then
-  printf '%s\n' 'Native effect ABI tested with Bend 2.0.27; review before changing compiler versions.' >&2
+  printf '%s\n' \
+    'Native effect ABI tested with Bend 2.0.27; review before changing compiler versions.' >&2
   exit 1
 fi
 mkdir -p build

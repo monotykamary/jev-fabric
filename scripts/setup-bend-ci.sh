@@ -14,7 +14,8 @@ root="${RUNNER_TEMP:?}/jev-bend-2.0.27"
 mkdir -p "$root"
 archive="$root/compiler.tar.gz"
 trap 'rm -f "$archive"' EXIT
-curl --proto '=https' --tlsv1.2 -fsSL "https://github.com/bendlang/bend/releases/download/v2.0.27/bend-2.0.27-$platform.tar.gz" -o "$archive"
+release='https://github.com/bendlang/bend/releases/download/v2.0.27'
+curl --proto '=https' --tlsv1.2 -fsSL "$release/bend-2.0.27-$platform.tar.gz" -o "$archive"
 if command -v sha256sum >/dev/null 2>&1; then
   printf '%s  %s\n' "$sum" "$archive" | sha256sum -c -
 else
@@ -24,7 +25,8 @@ tar -xzf "$archive" -C "$root"
 case "$platform" in
   darwin-*)
     codesign --verify --strict "$root/bend/bin/bend" || {
-      echo 'Upstream compiler signature is invalid. Use a trusted local build; do not bypass macOS signature checks.' >&2
+      echo 'Upstream compiler signature is invalid.' \
+        'Use a trusted local build; do not bypass macOS signature checks.' >&2
       exit 1
     }
     ;;
