@@ -24,3 +24,35 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: sh scripts/setup-bend-ci.sh
       - run: bun run test:native
+      - run: bend native/main.bend -o jev-fabric.c
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jev-fabric-c
+          path: jev-fabric.c
+          if-no-files-found: error
+  native-macos:
+    # macOS compiles the C that Bend emitted on Linux, as releases do.
+    needs: native
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: jev-fabric-c
+      - run: |
+          mkdir -p build
+          clang -std=c11 -O3 -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 \
+            jev-fabric.c -lpthread -lm -o build/jev-fabric
+      - name: Smoke test
+        run: |
+          set -eux
+          build/jev-fabric -- --help | grep -q 'usage: jev-fabric'
+          build/jev-fabric -- exec /bin/echo ok | grep -q '"stdout":"ok\\u000a"'
+          build/jev-fabric -- validate examples/native/request.json >/dev/null
+          id=$(build/jev-fabric -- start /bin/sh -c 'echo ready' | sed 's/.*"id":"\([0-9a-f]*\)".*/\1/')
+          build/jev-fabric -- wait "$id" | grep -q '"state":"exited"'
+  install-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh -n install.sh && sh -n scripts/package-release.sh

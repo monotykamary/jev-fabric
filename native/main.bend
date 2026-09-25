@@ -65,7 +65,7 @@ def validate_file(path: String) -> IO(Unit):
 
 def usage_text() -> String:
   "jev-fabric native Bend\n"
-    ++ "usage: build/jev-fabric -- <command>\n"
+    ++ "usage: jev-fabric -- <command>\n"
     ++ "  exec [--timeout-ms N] [--stdin] [--] <command> [args...]\n"
     ++ "  run [--timeout-ms N] [--] <program.bend> [args...]\n"
     ++ "  validate <request.json>\n"
@@ -81,7 +81,8 @@ def usage_text() -> String:
     ++ " Prefix options stop at the command/file; -- escapes numeric command names.\n"
     ++ "Native trusted code, not a sandbox. Shell interpretation is explicit.\n"
     ++ "Jev uses provider environment credentials or JEV_CREDENTIAL_COMMAND,"
-    ++ " private curl stdin, and no automatic retries."
+    ++ " pooled system libcurl (JEV_FABRIC_HTTP=exec: one curl per request),"
+    ++ " and no automatic retries."
 
 def usage() -> IO(Unit):
   IO.print(usage_text())

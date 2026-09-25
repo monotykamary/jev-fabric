@@ -1,0 +1,114 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  emit:
+    # Bend emits one portable C program; every platform compiles that same file.
+    # This also avoids running the upstream macOS compiler archive, whose
+    # signature is invalid (see docs/bend-migration.md).
+    runs-on: ubuntu-latest
+    env:
+      BEND_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: oven-sh/setup-bun@v2
+      - run: sh scripts/setup-bend-ci.sh
+      - run: bun scripts/check-native-safety.ts
+      - run: bend native/main.bend -o jev-fabric.c
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jev-fabric-c
+          path: jev-fabric.c
+          if-no-files-found: error
+
+  build:
+    needs: emit
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-22.04
+            cflags: ''
+            libs: -ldl
+          - platform: linux-arm64
+            runner: ubuntu-22.04-arm
+            cflags: ''
+            libs: -ldl
+          - platform: darwin-universal
+            runner: macos-latest
+            cflags: -arch arm64 -arch x86_64 -mmacosx-version-min=11.0
+            libs: ''
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: jev-fabric-c
+      - name: Compile (the flags Bend 2.0.27 uses)
+        run: |
+          mkdir -p build
+          clang -std=c11 -O3 ${{ matrix.cflags }} jev-fabric.c -lpthread -lm ${{ matrix.libs }} -o build/jev-fabric
+      - name: Smoke test
+        run: |
+          set -eux
+          tag="${{ inputs.tag || github.ref_name }}"
+          build/jev-fabric -- --version | grep -q "^${tag#v}-native"
+          build/jev-fabric -- --help | grep -q 'usage: jev-fabric'
+          build/jev-fabric -- exec /bin/echo ok | grep -q '"stdout":"ok\\u000a"'
+          build/jev-fabric -- validate examples/native/request.json >/dev/null
+          id=$(build/jev-fabric -- start /bin/sh -c 'echo ready' | sed 's/.*"id":"\([0-9a-f]*\)".*/\1/')
+          build/jev-fabric -- wait "$id" | grep -q '"state":"exited"'
+      - run: sh scripts/package-release.sh ${{ matrix.platform }} build/jev-fabric
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jev-fabric-${{ matrix.platform }}
+          path: dist/jev-fabric-${{ matrix.platform }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: jev-fabric-*-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          ls -la
+          sha256sum jev-fabric-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.tar.gz dist/SHA256SUMS --clobber
+          else
+            gh release create "$tag" dist/*.tar.gz dist/SHA256SUMS \
+              --title "jev-fabric $tag" --notes-file .github/release-notes.md --verify-tag
+          fi

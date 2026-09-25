@@ -2,12 +2,31 @@
   "name": "jev-fabric",
   "version": "0.1.0",
   "private": true,
-  "description": "Process orchestration with typed System One decisions, independent of any agent harness.",
+  "description": "Native process orchestration with typed, explicit Jev decisions, written in Bend.",
   "type": "module",
   "license": "MIT",
-  "bin": { "jev-fabric": "build/jev-fabric", "jev-fabric-reference": "dist/src/cli.js" },
-  "exports": { ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" } },
-  "files": ["native", "scripts", "dist/src", "examples", "docs", "README.md", "LICENSE"],
+  "bin": {
+    "jev-fabric": "build/jev-fabric",
+    "jev-fabric-reference": "dist/src/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "dist/src",
+    "docs",
+    "examples",
+    "install.sh",
+    "native",
+    "scripts",
+    "skills",
+    "static"
+  ],
   "scripts": {
     "build": "sh scripts/build-native.sh",
     "build:reference": "tsc -p tsconfig.json",
@@ -20,5 +39,13 @@
     "demo": "sh scripts/build-native.sh && build/jev-fabric -- run examples/native/pipeline.bend",
     "demo:reference": "node dist/src/cli.js run examples/pipeline.ts"
   },
-  "devDependencies": { "@types/node": "^24.0.0", "typescript": "^6.0.0" }
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monotykamary/jev-fabric.git"
+  },
+  "homepage": "https://github.com/monotykamary/jev-fabric"
 }
