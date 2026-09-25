@@ -84,9 +84,11 @@ def pid_sleeper() -> List<String>:
 def touch(marker: String) -> List<String>:
   ["/bin/sh", "-c", "touch \"$1\"", "sh", marker]
 
+# The budgets here and in `scope` leave ~250 ms per OS timer overshoot (macOS sleeps can run
+# that late) plus time for a sleeper to print its PID before the shared deadline reaps it.
 def active_session() -> IO(Unit):
   do IO<Unit>:
-    budget : Scope.Budget <- Scope.with_timeout(200)
+    budget : Scope.Budget <- Scope.with_timeout(600)
     IO.sleep(80)
     session : Session.Session <- IO.try(Session.Session, Scope.start(budget, pid_sleeper()))
     report : Process.Report <- IO.try(Process.Report, Session.wait(session))
@@ -94,9 +96,9 @@ def active_session() -> IO(Unit):
 
 def scope(+marker: String) -> IO(Unit):
   do IO<Unit>:
-    +budget : Scope.Budget <- Scope.with_timeout(350)
+    +budget : Scope.Budget <- Scope.with_timeout(1000)
     IO.sleep(100)
-    first : Process.Report <- Scope.run_for(budget, pid_sleeper(), "", 50)
+    first : Process.Report <- Scope.run_for(budget, pid_sleeper(), "", 100)
     IO.print(Process.show(first))
     second : Process.Report <- Scope.exec(budget, pid_sleeper())
     IO.print(Process.show(second))

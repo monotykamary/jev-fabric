@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, lstatSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { availableParallelism } from 'node:os';
 
 export interface Manifest {
   schemaVersion: number;
@@ -196,29 +197,104 @@ export function collect(root: string): Map<string, string> {
   return result;
 }
 
-export function check(root: string) {
+interface CompilerRun { output: string; failure?: string }
+
+// Deadline for one compiler run that has the machine to itself.
+const COMPILER_TIMEOUT_MS = 30000;
+
+// Never rejects: a failure is returned so that runs finishing out of order stay unobserved
+// until the in-order consumer reaches them.
+function compile(
+  root: string,
+  args: string[],
+  timeout = COMPILER_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<CompilerRun> {
+  const options = {
+    cwd: root,
+    encoding: 'utf8' as const,
+    timeout,
+    maxBuffer: 1048576,
+    env: { ...process.env, BEND_NO_TELEMETRY: '1' },
+    signal,
+  };
+  return new Promise(done => {
+    execFile('bend', args, options, (error, stdout, stderr) => {
+      if (!error) {
+        done({ output: stdout + stderr });
+        return;
+      }
+      // A compiler that exited or died on its own reports its text; harness errors
+      // (spawn failure, timeout, output limit, abort) report themselves.
+      const ended = typeof error.code === 'number' || (error.signal && !error.killed);
+      const detail = ended ? stderr + stdout : String(error);
+      done({ output: '', failure: `bend ${args.join(' ')}: ${detail}` });
+    });
+  });
+}
+
+// Runs at most `limit` tasks at once, starting them in call order.
+function limiter(limit: number) {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async function <T>(task: () => Promise<T>): Promise<T> {
+    if (active >= limit) await new Promise<void>(wake => waiting.push(wake));
+    active++;
+    try {
+      return await task();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+
+// Large modules take up to ~2 GB and 15-25 s to check, so run half the CPUs, at most 4.
+// JEV_CHECK_JOBS overrides this; 1 checks sequentially.
+function checkConcurrency(): number {
+  const configured = process.env.JEV_CHECK_JOBS;
+  if (configured === undefined || configured === '') {
+    return Math.max(1, Math.min(Math.floor(availableParallelism() / 2), 4));
+  }
+  if (!/^[1-9][0-9]*$/.test(configured)) {
+    throw new Error(`JEV_CHECK_JOBS must be a positive integer, got: ${configured}`);
+  }
+  return Number(configured);
+}
+
+export async function check(root: string) {
   const manifest = JSON.parse(readFileSync(resolve(root, 'native/trust.json'), 'utf8')) as Manifest;
   const sources = collect(root);
   const audit = auditSources(sources, manifest);
-  function compiler(args: string[]) {
-    const p = spawnSync('bend', args, {
-      cwd: root,
-      encoding: 'utf8',
-      timeout: 30000,
-      maxBuffer: 1048576,
-      env: { ...process.env, BEND_NO_TELEMETRY: '1' },
-    });
-    if (p.error || p.status !== 0) {
-      throw new Error(`bend ${args.join(' ')}: ${p.error ?? p.stderr + p.stdout}`);
-    }
-    return p.stdout + p.stderr;
-  }
-  if (compiler(['version']).trim() !== manifest.compiler) {
+  const version = await compile(root, ['version']);
+  if (version.failure) throw new Error(version.failure);
+  if (version.output.trim() !== manifest.compiler) {
     throw new Error('unreviewed compiler version');
   }
-  for (const path of sources.keys()) {
-    console.error(`Checking Bend: ${path}`);
-    acceptVerdict(path, compiler([path, '--check-only']), audit.pure.has(path));
+  // Modules compile concurrently but are judged in source order, so the log and the first
+  // rejected module match a sequential run. A rejection cancels the checks still pending.
+  // Each run shares the CPU with up to `concurrency - 1` others, so its hang deadline is
+  // scaled to match; a run that still times out is rejected.
+  const concurrency = checkConcurrency();
+  const timeout = COMPILER_TIMEOUT_MS * concurrency;
+  const cancel = new AbortController();
+  const slot = limiter(concurrency);
+  const checks = [...sources.keys()].map(path => ({
+    path,
+    run: slot(() => {
+      if (cancel.signal.aborted) return Promise.resolve({ output: '', failure: 'cancelled' });
+      return compile(root, [path, '--check-only'], timeout, cancel.signal);
+    }),
+  }));
+  try {
+    for (const { path, run } of checks) {
+      console.error(`Checking Bend: ${path}`);
+      const verdict = await run;
+      if (verdict.failure) throw new Error(verdict.failure);
+      acceptVerdict(path, verdict.output, audit.pure.has(path));
+    }
+  } finally {
+    cancel.abort();
   }
   console.log(
     `Native safety: ${audit.files} modules checked; ${manifest.pure.length} pure modules, `
@@ -229,7 +305,7 @@ export function check(root: string) {
 
 if (import.meta.main) {
   try {
-    check(resolve(import.meta.dir, '..'));
+    await check(resolve(import.meta.dir, '..'));
   } catch (error) {
     console.error(String(error));
     process.exitCode = 1;

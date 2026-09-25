@@ -96,7 +96,7 @@ code is promised. See the [native API](docs/native-api.md),
 ```sh
 bun install --frozen-lockfile --ignore-scripts  # development only
 bun run check:native-safety                   # also enforced by native builds
-bun run test:native
+bun run test:native                           # JEV_TEST_JOBS caps parallel fixture builds
 bun run test:reference                         # needs Node 24+
 bun run demo                                  # native; no model call
 ```
