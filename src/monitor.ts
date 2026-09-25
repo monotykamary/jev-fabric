@@ -4,6 +4,16 @@ import { integer } from './util.js';
 export interface MonitorOptions { match?: string; intervalMs?: number; lifetimeMs?: number }
 export interface MonitorBatch { lines: string[]; omitted: number }
 
+const DEFAULT_INTERVAL_MS = 250;
+const MIN_INTERVAL_MS = 10;
+const MAX_INTERVAL_MS = 60000;
+const DEFAULT_LIFETIME_MS = 300000;
+const MAX_LIFETIME_MS = 1800000;
+const MAX_MATCH_LENGTH = 256;
+const MAX_BATCH_LINES = 8;
+const PREVIEW_CHARS = 100;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
+
 export class LineFramer {
   private decoder = new StringDecoder('utf8');
   private line = '';
@@ -16,16 +26,26 @@ export class LineFramer {
       if (!this.truncated) {
         const next = this.line + parts[i]!;
         if (Buffer.byteLength(next) > this.maxBytes) {
+          // A code point split by the byte cut decodes to U+FFFD, which can exceed the limit again.
           this.line = Buffer.from(next).subarray(0, this.maxBytes).toString('utf8');
           while (Buffer.byteLength(this.line) > this.maxBytes) this.line = this.line.slice(0, -1);
           this.truncated = true;
-        } else this.line = next;
+        } else {
+          this.line = next;
+        }
       }
       if (i < parts.length - 1) this.flush();
     }
   }
-  private flush(): void { this.emit(this.line.replace(/\r$/, ''), this.truncated); this.line = ''; this.truncated = false; }
-  close(): void { this.accept(this.decoder.end()); if (this.line || this.truncated) this.flush(); }
+  private flush(): void {
+    this.emit(this.line.replace(/\r$/, ''), this.truncated);
+    this.line = '';
+    this.truncated = false;
+  }
+  close(): void {
+    this.accept(this.decoder.end());
+    if (this.line || this.truncated) this.flush();
+  }
 }
 
 /** Filtering is deterministic; intervalMs is delivery cadence, not a polling interval. */
@@ -36,23 +56,37 @@ export class Monitor {
   private timer: ReturnType<typeof setTimeout> | undefined;
   readonly framer: LineFramer;
   constructor(readonly options: MonitorOptions, private readonly emit: (batch: MonitorBatch) => void) {
-    integer(options.intervalMs ?? 250, 'monitor interval', 10, 60000);
-    integer(options.lifetimeMs ?? 300000, 'monitor lifetime', 1, 1800000);
-    if (options.match !== undefined && (!options.match || options.match.length > 256)) throw new Error('Monitor match must be a 1..256 character literal');
+    integer(options.intervalMs ?? DEFAULT_INTERVAL_MS, 'monitor interval', MIN_INTERVAL_MS, MAX_INTERVAL_MS);
+    integer(options.lifetimeMs ?? DEFAULT_LIFETIME_MS, 'monitor lifetime', 1, MAX_LIFETIME_MS);
+    const invalidMatch = !options.match || options.match.length > MAX_MATCH_LENGTH;
+    if (options.match !== undefined && invalidMatch) {
+      throw new Error('Monitor match must be a 1..256 character literal');
+    }
     this.framer = new LineFramer((line, truncated) => {
-      line = line.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim();
-      if (!line || (options.match && !line.includes(options.match)) || line === this.previous) return;
+      line = line.replace(CONTROL_CHARACTERS, ' ').trim();
+      if (!line) return;
+      if (options.match && !line.includes(options.match)) return;
+      // Suppress adjacent duplicates among matching lines.
+      if (line === this.previous) return;
       this.previous = line;
-      if (this.lines.length === 8) { this.lines.shift(); this.omitted++; }
-      this.lines.push(line.slice(0, 100) + (truncated || line.length > 100 ? ' [truncated]' : ''));
-      if (!this.timer) this.timer = setTimeout(() => this.flush(), options.intervalMs ?? 250);
+      if (this.lines.length === MAX_BATCH_LINES) {
+        this.lines.shift();
+        this.omitted++;
+      }
+      const clipped = truncated || line.length > PREVIEW_CHARS;
+      this.lines.push(line.slice(0, PREVIEW_CHARS) + (clipped ? ' [truncated]' : ''));
+      if (!this.timer) this.timer = setTimeout(() => this.flush(), options.intervalMs ?? DEFAULT_INTERVAL_MS);
     });
   }
   private flush(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     if (this.lines.length) this.emit({ lines: this.lines, omitted: this.omitted });
-    this.lines = []; this.omitted = 0;
+    this.lines = [];
+    this.omitted = 0;
   }
-  close(): void { this.framer.close(); this.flush(); }
+  close(): void {
+    this.framer.close();
+    this.flush();
+  }
 }

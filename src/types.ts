@@ -4,11 +4,26 @@ export type Question =
   | { type: 'choice'; instructions: Description; criteria: Record<string, Description | null> }
   | { type: 'noul'; instructions: Description; criteria?: { true?: Description; false?: Description } }
   | { type: 'score'; instructions: Description; criteria: Description[] };
-export type ChoiceAnswer = { type: 'choice'; choice: string; confidence: number; probabilities: Record<string, number> };
+export type ChoiceAnswer = {
+  type: 'choice';
+  choice: string;
+  confidence: number;
+  probabilities: Record<string, number>;
+};
 export type NoulAnswer = { type: 'noul'; noul: number };
-export type ScoreAnswer = { type: 'score'; score: number; confidence: number; probabilities: Record<string, number>; legend: Record<string, Json> };
+export type ScoreAnswer = {
+  type: 'score';
+  score: number;
+  confidence: number;
+  probabilities: Record<string, number>;
+  legend: Record<string, Json>;
+};
 export type Answer = ChoiceAnswer | NoulAnswer | ScoreAnswer;
-export type AnswerFor<Q> = Q extends { type: 'choice' } ? ChoiceAnswer : Q extends { type: 'noul' } ? NoulAnswer : Q extends { type: 'score' } ? ScoreAnswer : Answer;
+export type AnswerFor<Q> =
+  Q extends { type: 'choice' } ? ChoiceAnswer
+  : Q extends { type: 'noul' } ? NoulAnswer
+  : Q extends { type: 'score' } ? ScoreAnswer
+  : Answer;
 export interface JevRequest<Q extends Record<string, Question> = Record<string, Question>> {
   state: Description;
   questions: Q;
