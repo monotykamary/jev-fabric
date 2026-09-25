@@ -1,5 +1,5 @@
 import { test, expect, afterAll } from 'bun:test';
-import { rmSync, statSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import manifest from '../../package.json';
 import { capture, jsonLines, nativeBin, tempRoot } from './helpers.ts';
@@ -42,9 +42,9 @@ def main() -> IO(Unit):
 test('public native help registers execution, source, validation, Jev and job verbs', async () => {
   const r = await run(['--help']);
   expect(r.code).toBe(0);
-  const verbs = ['exec', 'run', 'validate', 'jev', 'start', 'status', 'events', 'wait', 'stop', 'watch'];
+  const verbs = ['exec', 'run', 'validate', 'jev', 'start', 'status', 'events', 'wait', 'stop', 'watch', 'update'];
   for (const cmd of verbs) expect(r.out).toContain(cmd);
-  expect((await run(['--version'])).out).toContain('0.1.0-native');
+  expect((await run(['--version'])).out).toContain('0.2.0-native');
   expect(manifest.bin['jev-fabric']).toBe('build/jev-fabric');
   expect(manifest.bin['jev-fabric-reference']).toBe('dist/src/cli.js');
   expect(manifest.scripts.demo).toContain('examples/native/pipeline.bend');
@@ -119,4 +119,39 @@ test('shipped executable owns background workers and private replay with no JS r
   expect(rows.some(x => x.type === 'process.output')).toBe(true);
   expect((await run(['stop', id], noRuntime)).code).toBe(0);
   expect((await run(['status', '../escape'])).code).not.toBe(0);
+});
+
+test('update shows and runs the curl installer, relaying its output and status', async () => {
+  // A fake curl on PATH stands in for the network: it records its argv and
+  // "downloads" a script that the real sh then runs.
+  const bin = join(root, 'update-bin');
+  const record = join(root, 'update-curl-args');
+  mkdirSync(bin, { recursive: true });
+  const fakeCurl = [
+    '#!/bin/sh',
+    `printf '%s\\n' "$@" > '${record}'`,
+    `printf '%s\\n' 'echo "installed $FAKE_RELEASE"' 'echo "installer note" >&2' 'exit "$FAKE_EXIT"'`,
+  ].join('\n');
+  writeFileSync(join(bin, 'curl'), fakeCurl, { mode: 0o755 });
+  const path = `${bin}:/usr/bin:/bin`;
+  const command = 'curl -fsSL https://raw.githubusercontent.com/monotykamary/jev-fabric/main/install.sh | sh';
+
+  const ok = await capture([nativeBin, '--', 'update'], {
+    env: { PATH: path, FAKE_RELEASE: 'v9.9.9', FAKE_EXIT: '0' },
+  });
+  expect(ok.code, ok.err).toBe(0);
+  expect(ok.out).toBe('installed v9.9.9\n');
+  expect(ok.err).toBe(`${command}\ninstaller note\n`);
+  expect(readFileSync(record, 'utf8')).toBe(
+    '-fsSL\nhttps://raw.githubusercontent.com/monotykamary/jev-fabric/main/install.sh\n',
+  );
+
+  const failed = await capture([nativeBin, '--', 'update'], {
+    env: { PATH: path, FAKE_RELEASE: 'v9.9.9', FAKE_EXIT: '3' },
+  });
+  expect(failed.code).toBe(3);
+  expect(failed.out).toBe('installed v9.9.9\n');
+
+  const extra = await run(['update', 'now']);
+  expect(extra.code).not.toBe(0);
 });

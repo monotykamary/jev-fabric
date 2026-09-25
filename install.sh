@@ -89,4 +89,5 @@ esac
 say ''
 say 'Next:'
 say '  jev-fabric -- --help'
+say '  jev-fabric -- update                     # later: reinstall the latest release'
 say '  npx skills add monotykamary/jev-fabric   # teach your coding agent'

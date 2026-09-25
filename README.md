@@ -49,6 +49,9 @@ verifies `SHA256SUMS`, installs to `~/.local/bin/jev-fabric`, and puts the Bend
 library at `~/.local/share/jev-fabric/current/native`. Set `JEV_FABRIC_VERSION=v0.1.0`
 to pin a release or `JEV_FABRIC_PREFIX` to change the prefix.
 
+Update any time with `jev-fabric -- update`. Like `bend update`, it prints and
+runs the same `curl … | sh`, and the variables above still apply.
+
 <details>
 <summary>Build from source</summary>
 

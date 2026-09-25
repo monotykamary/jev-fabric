@@ -20,6 +20,7 @@ All commands follow `build/jev-fabric --`:
 | `events <id> [after-sequence]` | Snapshot of bounded retained JSONL events |
 | `wait [--timeout-ms N] <id>` | Poll until final receipt or client deadline; timeout returns running state |
 | `stop <id>` | Idempotent cooperative stop through a private marker, never arbitrary PID signalling |
+| `update` | Print and run `curl -fsSL …/install.sh \| sh`, like `bend update`; exits with the installer's status. `JEV_FABRIC_PREFIX`/`JEV_FABRIC_VERSION` pass through |
 | `watch [--timeout-ms N] <id> <literal>` | Live bounded line batches, loss records and a final observation summary; duration 1..300000 ms |
 
 Timers may be omitted. Defaults and configuration:

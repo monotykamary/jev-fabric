@@ -13,6 +13,8 @@ npx skills add monotykamary/jev-fabric
 | `jev-fabric-linux-x64.tar.gz` | Linux x86_64, glibc 2.35+ |
 | `jev-fabric-linux-arm64.tar.gz` | Linux aarch64, glibc 2.35+ |
 
+Update later with `jev-fabric -- update`, which reruns the installer.
+
 Each archive holds the `jev-fabric` executable, the Bend library (`native/`) for
 `jev-fabric -- run` programs, the examples and the agent skill. Verify with
 `SHA256SUMS`; the installer does this for you. Jev calls need the system libcurl or

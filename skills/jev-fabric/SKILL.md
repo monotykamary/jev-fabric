@@ -16,7 +16,7 @@ command starts with `jev-fabric --`.
 ## Check the install
 
 ```bash
-jev-fabric -- --version        # 0.1.0-native (Bend 2.0.27)
+jev-fabric -- --version        # 0.2.0-native (Bend 2.0.27)
 ```
 
 If it is missing, install the release binary (macOS universal, Linux x64/arm64):
@@ -26,7 +26,8 @@ curl -fsSL https://raw.githubusercontent.com/monotykamary/jev-fabric/main/instal
 ```
 
 It installs to `~/.local/bin/jev-fabric` and the Bend library to
-`~/.local/share/jev-fabric/current/native/`. Ask before installing.
+`~/.local/share/jev-fabric/current/native/`. `jev-fabric -- update` reruns that
+installer for the latest release. Ask before installing or updating.
 
 ## Run something once
 

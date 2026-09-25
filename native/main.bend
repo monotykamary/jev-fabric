@@ -74,6 +74,7 @@ def usage_text() -> String:
     ++ "  status <id> | events <id> [after-sequence]\n"
     ++ "  watch [--timeout-ms N] <id> <literal>\n"
     ++ "  wait [--timeout-ms N] <id> | stop <id>\n"
+    ++ "  update (reinstall the latest release via curl | sh)\n"
     ++ "Defaults: work 1h, Jev 30s, wait 30s, watch 5s. Timers are ceilings, not delays.\n"
     ++ "Configure JEV_FABRIC_TIMEOUT_MS, JEV_FABRIC_JEV_TIMEOUT_MS,"
     ++ " JEV_FABRIC_WAIT_MS, JEV_FABRIC_WATCH_MS.\n"
@@ -83,6 +84,38 @@ def usage_text() -> String:
     ++ "Jev uses provider environment credentials or JEV_CREDENTIAL_COMMAND,"
     ++ " pooled system libcurl (JEV_FABRIC_HTTP=exec: one curl per request),"
     ++ " and no automatic retries."
+
+# `update` reinstalls the latest release the way `bend update` does: it shows the
+# exact command, runs it, and exits with its status. JEV_FABRIC_PREFIX and
+# JEV_FABRIC_VERSION pass through to the installer.
+def update_command() -> String:
+  "curl -fsSL https://raw.githubusercontent.com/monotykamary/jev-fabric/main/install.sh | sh"
+
+# Ten minutes covers a slow download; the installer itself takes seconds.
+def update_timeout() -> U32:
+  600000
+
+# Base has no raw stderr write; print_err adds the final newline back.
+def relay_err(+text: String, empty: Bool) -> IO(Unit):
+  match empty:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.print_err(String.trim_end(text))
+
+def updated(report: Process.Report) -> IO(Unit):
+  match report:
+    case Process.Report{+code, timed_out, cancelled, out_cut, err_cut, stdout, +stderr}:
+      do IO<Unit>:
+        IO.write(stdout)
+        relay_err(stderr, String.is_empty(stderr))
+        finish(code, U32.is_eq(code, 0))
+
+def update() -> IO(Unit):
+  do IO<Unit>:
+    IO.print_err(update_command())
+    report : Process.Report <- Process.run(["/bin/sh", "-c", update_command()], "", update_timeout())
+    updated(report)
 
 def usage() -> IO(Unit):
   IO.print(usage_text())
@@ -94,7 +127,9 @@ def dispatch(args: List<String>) -> IO(Unit):
     case Con{"--help", Nil{}}:
       usage()
     case Con{"--version", Nil{}}:
-      IO.print("0.1.0-native (Bend 2.0.27)")
+      IO.print("0.2.0-native (Bend 2.0.27)")
+    case Con{"update", Nil{}}:
+      update()
     case Con{"exec", Con{timeout, Con{"--stdin", Con{command, rest}}}}:
       execute(Con{command, rest}, U32.read(timeout), True{})
     case Con{"exec", Con{timeout, Con{command, rest}}}:
