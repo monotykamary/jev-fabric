@@ -164,17 +164,19 @@ def usage_ready(
       (input, output) = counts
       account(settings, budget, key, response, input, output)
 
+# Wire.reply_usage accepts exactly what Wire.usage would on the normalized reply,
+# reusing the counts normalize already parsed.
 def response_ready(
   settings: Settings,
   budget: Core.Budget,
   key: String,
-  response: Evaluation,
+  response: Result<&1, &1, Error, Wire.Reply>,
 ) -> Returned:
   match response:
     case Fail{e}:
       returned(settings, budget, key, Fail{(1, "Invalid typed Jev response")})
-    case Done{+value}:
-      usage_ready(settings, budget, key, value, Wire.usage(value))
+    case Done{+reply}:
+      usage_ready(settings, budget, key, Wire.reply_value(reply), Wire.reply_usage(reply))
 
 def decoded(
   settings: Settings,
@@ -187,7 +189,7 @@ def decoded(
     case Fail{e}:
       returned(settings, budget, key, Fail{(1, "Invalid UTF-8 Jev response")})
     case Done{s}:
-      response_ready(settings, budget, key, Wire.response(s, request))
+      response_ready(settings, budget, key, Wire.reply(s, request))
 
 def received(
   settings: Settings,

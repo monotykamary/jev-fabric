@@ -161,6 +161,10 @@ def read_result(
     count : U32 = U32.from_nat(List.length(&2, U32, bytes))
     return read_decoded(file, offset, count, omitted, Streams.take(Streams.feed(bytes, decoder)))
 
+# a - b, or 0 when b >= a.
+def saturating_sub(+a: U32, +b: U32) -> U32:
+  U32.sub(U32.max(a, b), b)
+
 def reset(decoder: Streams.Decoder, skipped: Bool) -> Streams.Decoder:
   match skipped:
     case True{}:
@@ -178,7 +182,7 @@ def read_sized(
   do IO<Chunk>:
     +size : U32 <- IO.pass(U32, result)
     +bounded : U32 = U32.min(size, spool_limit())
-    +tail : U32 = Bool.pick(U32, U32.is_gt(bounded, window()), U32.sub(bounded, window()), 0)
+    +tail : U32 = saturating_sub(bounded, window())
     +offset : U32 = U32.max(tail, previous)
     +omitted : U32 = U32.sub(offset, previous)
     pair : Bytes <- File.read_at(file, offset, window())
@@ -238,6 +242,30 @@ def persist_changed(id: String, ring: Ring, changed: Bool) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
+# Minimum ticks between event-file rewrites (100 ms). Each rewrite copies every
+# retained event, so chatty jobs publish at this rate instead of every tick.
+def save_interval() -> U32:
+  4
+
+# Whether the ring holds events not yet saved, and the ticks since the last save.
+type Pending is Data:
+  Pending{unsaved: Bool, age: U32}
+
+# A change is saved at once when the last save is save_interval() ticks old, and
+# otherwise within save_interval() - 1 further ticks. A finishing tick skips this
+# save: the terminal save that follows immediately covers it.
+def save_due(pending: Pending, changed: Bool, finished: Bool) -> Bool:
+  match pending:
+    case Pending{unsaved, age}:
+      (unsaved || changed) && Bool.not(finished) && U32.is_ge(age, save_interval())
+
+def after_tick(pending: Pending, changed: Bool, saved: Bool) -> Pending:
+  match pending saved:
+    case _ True{}:
+      Pending{False{}, 1}
+    case Pending{unsaved, age} False{}:
+      Pending{unsaved || changed, U32.min(U32.inc(age), save_interval())}
+
 def pause(terminal: Bool) -> IO(Unit):
   match terminal:
     case True{}:
@@ -254,15 +282,22 @@ def terminal(+id: String, +receipt: String, out: Cursor, err: Cursor, ring: Ring
     Host.write(id, "receipt.json", receipt)
 
 type Turn is Type:
-  Again{out: Cursor, err: Cursor, ring: Ring}
+  Again{out: Cursor, err: Cursor, ring: Ring, pending: Pending}
   End{out: Cursor, err: Cursor, ring: Ring, receipt: String}
 
-def turn(out: Cursor, err: Cursor, ring: Ring, receipt: String, done: Bool) -> Turn:
+def turn(
+  out: Cursor,
+  err: Cursor,
+  ring: Ring,
+  pending: Pending,
+  receipt: String,
+  done: Bool,
+) -> Turn:
   match done:
     case True{}:
       End{out, err, ring, receipt}
     case False{}:
-      Again{out, err, ring}
+      Again{out, err, ring, pending}
 
 # Finish only on a quiet tick after the result appeared, so late output is drained.
 def tick_finish(
@@ -270,6 +305,7 @@ def tick_finish(
   +receipt: String,
   out: Cursor,
   out_count: U32,
+  +pending: Pending,
   pair: Cursor & (Ring & U32),
 ) -> IO(Turn):
   (err, payload) = pair
@@ -277,38 +313,52 @@ def tick_finish(
   +ring = {ring : Ring}
   +done = Bool.not(String.eq(receipt, ""))
   +changed = U32.is_ne(out_count, 0) || U32.is_ne(err_count, 0)
+  +finished = done && Bool.not(changed)
+  +due = save_due(pending, changed, finished)
   do IO<Turn>:
-    persist_changed(id, ring, changed)
+    persist_changed(id, ring, due)
     pause(done)
-    return turn(out, err, ring, receipt, done && Bool.not(changed))
+    return turn(out, err, ring, after_tick(pending, changed, due), receipt, finished)
 
-def tick_err(id: String, receipt: String, err: Cursor, pair: Cursor & (Ring & U32)) -> IO(Turn):
+def tick_err(
+  id: String,
+  receipt: String,
+  err: Cursor,
+  pending: Pending,
+  pair: Cursor & (Ring & U32),
+) -> IO(Turn):
   (out, (ring, out_count)) = pair
   do IO<Turn>:
     pair : Cursor & (Ring & U32) <- observe(err, ring, "stderr")
-    tick_finish(id, receipt, out, out_count, pair)
+    tick_finish(id, receipt, out, out_count, pending, pair)
 
-def tick(+id: String, out: Cursor, err: Cursor, ring: Ring) -> IO(Turn):
+def tick(+id: String, out: Cursor, err: Cursor, ring: Ring, pending: Pending) -> IO(Turn):
   do IO<Turn>:
     stopped : String <- Host.read(id, "stop", marker_limit())
     cancel(stopped)
     receipt : String <- Host.read(id, "result.json", spool_limit())
     pair : Cursor & (Ring & U32) <- observe(out, ring, "stdout")
-    tick_err(id, receipt, err, pair)
+    tick_err(id, receipt, err, pending, pair)
+
+def unsaved(pending: Pending) -> Bool:
+  match pending:
+    case Pending{unsaved, age}:
+      unsaved
 
 def control(fuel: Nat, +id: String, turn: Turn) -> IO(Unit):
   match fuel turn:
     case fuel End{out, err, ring, receipt}:
       terminal(id, receipt, out, err, ring)
-    case 0n Again{out, err, ring}:
+    case 0n Again{out, err, +ring, pending}:
       do IO<Unit>:
+        persist_changed(id, ring, unsaved(pending))
         Process.cancel(15)
         ring : Ring <- close(out, ring, "stdout")
         ring : Ring <- close(err, ring, "stderr")
         IO.die(Unit, 1, "job controller fuel exhausted")
-    case 1n+rest Again{out, err, ring}:
+    case 1n+rest Again{out, err, ring, pending}:
       do IO<Unit>:
-        next : Turn <- tick(id, out, err, ring)
+        next : Turn <- tick(id, out, err, ring, pending)
         control(rest, id, next)
 
 def worker_run(+id: String, argv: List<String>, +timeout: U32) -> IO(Unit):
@@ -325,7 +375,8 @@ def worker_run(+id: String, argv: List<String>, +timeout: U32) -> IO(Unit):
     fuel : Nat = U32.to_nat(U32.add(U32.div(timeout, 25), 4096))
     out_cursor : Cursor = Cursor{out_read, 0, Streams.empty()}
     err_cursor : Cursor = Cursor{err_read, 0, Streams.empty()}
-    control(fuel, id, Again{out_cursor, err_cursor, ring})
+    # Start as if the last save were old, so the first output is saved at once.
+    control(fuel, id, Again{out_cursor, err_cursor, ring, Pending{False{}, save_interval()}})
     IO.join(Unit, work)
 
 def worker_fresh(id: String, argv: List<String>, timeout: U32, fresh: Bool) -> IO(Unit):
