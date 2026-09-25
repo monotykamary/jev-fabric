@@ -1,110 +1,178 @@
-# jev-fabric
+<img src="https://raw.githubusercontent.com/monotykamary/jev-fabric/main/static/banner-ink.svg" alt="jev-fabric" width="100%" />
 
-Native process orchestration with typed Jev decisions, independent of Pi, Codex,
-Claude, or any other harness. Application logic is written in **Bend**; a small
-POSIX bridge owns processes and private files. HTTPS uses the system libcurl
-in-process, keeping connections warm across Jev calls, and falls back to the
-system `curl` executable; no other language runtime is involved.
+# jev-fabric 🧵
 
-**The native executable needs neither Node nor Bun.** The preserved TypeScript
-implementation is a [reference](docs/typescript-reference.md), not a dependency.
-Native and reference APIs intentionally differ; this is not a drop-in SDK port.
-Nothing is published.
+Native process orchestration with typed, explicit Jev decisions. One small
+executable owns your processes, remembers what they said, and asks
+[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) a question
+**only when you tell it to**.
 
-## Quickstart
+Written in [Bend](https://github.com/bendlang/bend). No Node, Python or daemon at
+runtime. Independent of Pi, Codex, Claude or any other harness.
 
-Build with **Bend 2.0.27**, Clang and Bun (for the build-time safety gate). Jev calls additionally require trusted
-system libcurl or `curl` and a working system CA store. Source-program execution requires the toolchain;
-precompiled programs and job controls do not.
+```text
+● agent: starts a dev server, a test run, a game bridge
+│
+● jev-fabric owns each one: process group, deadline, bounded logs
+│
+● agent watches for "ready", reads a bounded receipt, not 40 MB of logs
+│
+● one fuzzy call left? ask Jev: choice · noul · score, never free text
+│
+✓ typed answer → a branch you already wrote          no hidden inference
+```
+
+**Your agent now has hands that don't get lost in the logs.**
+
+<img src="https://raw.githubusercontent.com/monotykamary/jev-fabric/main/static/demo.svg" alt="jev-fabric racing Wikipedia and playing Doom with typed Jev choices" width="100%" />
+
+## Give it to your agent
+
+Paste this into Codex, Claude Code or any coding agent:
+
+```text
+Install jev-fabric with `curl -fsSL https://raw.githubusercontent.com/monotykamary/jev-fabric/main/install.sh | sh`, add its skill with `npx skills add monotykamary/jev-fabric`, then verify with `jev-fabric -- exec /bin/echo ready`. Don't make any Jev (network model) calls until I give you credentials and ask.
+```
+
+That's it. The agent installs a checksum-verified release, learns the workflow
+from the skill, and proves the binary runs.
+
+## Install it yourself
 
 ```sh
-sh scripts/build-native.sh                   # or bun run build
+curl -fsSL https://raw.githubusercontent.com/monotykamary/jev-fabric/main/install.sh | sh
+npx skills add monotykamary/jev-fabric        # or: bunx skills add monotykamary/jev-fabric
+```
+
+Releases ship a macOS universal binary and Linux x64/arm64 binaries. The installer
+verifies `SHA256SUMS`, installs to `~/.local/bin/jev-fabric`, and puts the Bend
+library at `~/.local/share/jev-fabric/current/native`. Set `JEV_FABRIC_VERSION=v0.1.0`
+to pin a release or `JEV_FABRIC_PREFIX` to change the prefix.
+
+<details>
+<summary>Build from source</summary>
+
+Requires **Bend 2.0.27**, Clang and Bun (for the build-time safety gate).
+
+```sh
+sh scripts/build-native.sh             # or: bun run build
 build/jev-fabric -- --help
-build/jev-fabric -- exec /bin/echo hello
-printf 'native stdin\n' | build/jev-fabric -- exec --stdin /bin/cat
-build/jev-fabric -- run examples/native/pipeline.bend
-build/jev-fabric -- run examples/native/persistent.bend
-build/jev-fabric -- validate examples/native/request.json
 ```
 
-The first `--` separates Bend runtime options from application arguments.
-Shell syntax requires an explicitly invoked shell. Compile with `-o`: Bend's
-JavaScript execution mode cannot run our native effects.
+</details>
 
-**Timers are optional.** Work defaults to a one-hour safety ceiling, Jev to 30
-seconds, `wait` to 30 seconds and `watch` to five seconds. These are maximums,
-not delays. Configure defaults once with `JEV_FABRIC_TIMEOUT_MS`,
-`JEV_FABRIC_JEV_TIMEOUT_MS`, `JEV_FABRIC_WAIT_MS` and `JEV_FABRIC_WATCH_MS`, or
-use a prefix override when needed: `exec --timeout-ms 5000 /bin/echo hello`.
-Existing positional timeouts still work. For composed Bend programs,
-[`Scope.open()` and `Scope.exec`](docs/native-api.md#scopebend-shared-deadline-budgets)
-share one budget across operations; see `examples/native/scoped.bend`.
-
-Background work survives its launcher:
+## Seven verbs. Every process.
 
 ```sh
-build/jev-fabric -- start /bin/sh -c 'printf "ready\n"; sleep 10'
-# Use the returned ID:
-build/jev-fabric -- status <id>
-build/jev-fabric -- events <id>                 # bounded JSONL replay
-build/jev-fabric -- watch <id> ready            # live filtered line batches
-build/jev-fabric -- wait <id>                   # wait does not cancel the job
-build/jev-fabric -- stop <id>
+jev-fabric -- exec /bin/echo hello                        # literal argv, bounded receipt
+printf 'hi\n' | jev-fabric -- exec --stdin /bin/cat         # forward stdin
+jev-fabric -- run examples/native/pipeline.bend             # compile + run Bend (needs bend)
+
+id=$(jev-fabric -- start /bin/sh -c 'npm run dev' | jq -r .id)   # survives its launcher
+jev-fabric -- watch "$id" ready                            # live, filtered, bounded lines
+jev-fabric -- events "$id"                                 # bounded JSONL replay
+jev-fabric -- wait "$id"                                   # waiting never cancels
+jev-fabric -- stop "$id"                                   # idempotent, never signals a stale PID
 ```
 
-Storage defaults to `.jev-fabric-native/`, or `JEV_FABRIC_HOME`. Roots and job
-files are private; job IDs are not PIDs. Retention is bounded per job and by a
-1024-directory limit per root. There is no automatic garbage collection.
+The first `--` separates Bend runtime options from yours. Shell syntax only
+happens when you invoke a shell. Every child gets its own process group and a
+deadline; receipts keep 32 KiB tails, spools keep the first 1 MiB per stream,
+jobs keep their latest 64 events, and any loss is disclosed, never silent.
 
-## Explicit decisions
+**Timers are optional ceilings, not delays.** Work defaults to one hour, Jev to
+30 s, `wait` to 30 s and `watch` to 5 s. Override per call with
+`--timeout-ms N` before the command, or once with `JEV_FABRIC_TIMEOUT_MS`,
+`JEV_FABRIC_JEV_TIMEOUT_MS`, `JEV_FABRIC_WAIT_MS` and `JEV_FABRIC_WATCH_MS`.
 
-No output automatically triggers a model call. Native programs import
-`native/Jev.bend` and thread an affine client through `Jev.evaluate`, or use:
+## Typed decisions, on purpose
+
+Jev is a *System One* model: it answers structured questions with typed values
+in a few hundred milliseconds instead of generating text.
 
 ```sh
-# Opt-in network request; only the synthetic example is sent.
 export JEV_PROVIDER=typesafe
-export JEV_CREDENTIAL_COMMAND='["localterm","secret","get","typesafe_api_key"]'
-build/jev-fabric -- jev examples/native/request.json 10000
+export JEV_CREDENTIAL_COMMAND='["pass","show","typesafe"]'   # or TYPESAFE_API_KEY
+jev-fabric -- validate examples/native/request.json          # offline
+jev-fabric -- jev examples/native/request.json 10000         # one billed call
 ```
 
-Credentials resolve lazily from the provider environment variable or a bounded
-literal argv command. They never enter curl argv or public receipts. HTTPS
-verifies certificates/hostnames, rejects redirects, disables proxy/.curlrc
-configuration, bounds output and time, and never retries automatically.
-Successive calls reuse one pooled TLS connection (`JEV_FABRIC_HTTP=exec` forces
-a fresh `curl` process per request instead).
-Provider responses pass strict JSON/UTF-8 and complete Choice/Noul/Score
-validation; unrecognized response fields are stripped. Budgets bound calls and
-reported tokens, not guaranteed billing: the final request can overshoot.
+```json
+{"model":"jev-1.13.0","answers":{
+  "healthy":{"type":"noul","noul":0.95},
+  "next":{"type":"choice","choice":"verify","confidence":1.0,"probabilities":{"verify":1.0,"repair":0.0}},
+  "confidence":{"type":"score","score":1.0,"confidence":1.0,"probabilities":{"0":0.0,"1":1.0},"legend":{"0":"Low","1":"High"}}},
+  "usage":{"input_tokens":380,"output_tokens":61}}
+```
 
-## Boundaries and verification
+- **Nothing calls Jev implicitly.** No output, match or exit code triggers a model call.
+- **Strict both ways.** Requests and answers pass strict JSON/UTF-8 and complete
+  choice/noul/score validation: a `choice` is always one of your keys,
+  probabilities sum to one, unknown fields are stripped.
+- **Private credentials.** Keys come from the provider variable or a literal argv
+  resolver, and never enter argv, logs or receipts.
+- **Budgets and no retries.** Clients bound calls and reported tokens. Failed
+  dispatches still count, and nothing is retried automatically.
+- **Warm connections.** HTTPS runs through the system libcurl in-process with a
+  pooled TLS connection: verified certificates, no redirects, no proxies, 1 MiB
+  bound. `JEV_FABRIC_HTTP=exec` forces a fresh `curl` process per request.
 
-Project Bend code contains **no unsafe definitions**. Twelve pure policy modules
-and three proof roots check without trust warnings; 27 explicit laws cover selected
-runtime policy properties. Effect drivers retain an explicit foreign-code
-boundary. See [safe Bend and proof coverage](docs/safe-bend.md)—this is not a
-claim of whole-program formal verification.
+## Loops in Bend
 
-Trusted native execution is **not a sandbox**. A zero exit means `exited`, not
-verified task completion. Logs are bounded observations, not a lossless protocol;
-no reboot resume, exactly-once execution, or protection from arbitrary native
-code is promised. See the [native API](docs/native-api.md),
-[acceptance ledger](docs/native-rewrite-ledger.md), and
-[toolchain/migration limits](docs/bend-migration.md).
+When a task is a loop (a bot, a crawler, a supervisor), write a small Bend
+program: one affine Jev client, one warm connection, persistent child sessions
+and shared deadlines.
+
+| Demo | What it does | Measured |
+| --- | --- | --- |
+| [`wikirace.bend`](examples/native/wikirace.bend) | Races Wikipedia links toward a target. Pages with more than 255 links become a tournament of 255-way `choice` calls | Doom (1993) → Albert Einstein in **3 clicks, 6.6 s** |
+| [`doom.bend`](examples/native/doom.bend) + [`bridge.py`](examples/doom/) | Plays ViZDoom's *defend the center* from structured game state, one `choice` per tick | **11 kills, no damage** in 150 decisions, **408 ms** mean |
+| [`persistent.bend`](examples/native/persistent.bend) | One child process keeps state across three JSONL requests | offline |
+| [`scoped.bend`](examples/native/scoped.bend) | Concurrent processes share one deadline budget | offline |
+
+Pooled HTTPS turned the Doom loop from **1144 ms → 365 ms** per decision: only
+the first call pays the TLS handshake.
+
+```python
+import Base
+import ./native/Jev.bend as Jev
+
+def main() -> IO(Unit):
+  do IO<Unit>:
+    client : Jev.Client <- IO.try(Jev.Client, Jev.connect(1, 10000))   # calls, tokens
+    result : Jev.Returned <- Jev.evaluate(client, request_json)
+    ...
+```
+
+See the [native API](docs/native-api.md) and the skill's
+[Bend reference](skills/jev-fabric/references/bend-api.md).
+
+## Boundaries
+
+- **Trusted native execution, not a sandbox.** Commands run with your privileges.
+- **`exited` is not success.** A zero exit is an observation; verify the work.
+- **Bounded observations, not a lossless protocol.** No reboot resume,
+  exactly-once execution or rollback.
+- **Checked policy core.** Project Bend code has no unsafe definitions; twelve
+  pure policy modules and three proof roots check without trust warnings, and 27
+  laws cover selected runtime policy. Effects cross an explicit, allowlisted
+  foreign boundary of nine C functions. This is
+  [scoped proof coverage](docs/safe-bend.md), not whole-program verification.
+
+## Develop
 
 ```sh
-bun install --frozen-lockfile --ignore-scripts  # development only
-bun run check:native-safety                   # also enforced by native builds
-bun run test:native                           # JEV_TEST_JOBS caps parallel fixture builds
-bun run test:reference                         # needs Node 24+
-bun run demo                                  # native; no model call
+bun install --frozen-lockfile --ignore-scripts
+bun run check:native-safety      # also enforced by native builds
+bun run test:native              # JEV_TEST_JOBS caps parallel fixture builds
+bun run test:reference           # the TypeScript reference; Node 24+
+bun run demo                     # native, no model call
 ```
 
-`package.json` registers `jev-fabric` as the built native executable and
-`jev-fabric-reference` as the explicit reference CLI. Its JS exports remain the
-reference compatibility SDK; native programs import `.bend` modules directly.
-Build reference artifacts with `bun run build:reference` when needed.
+The preserved TypeScript implementation is a [reference](docs/typescript-reference.md),
+not a runtime dependency. More: [architecture](docs/architecture.md),
+[Bend migration](docs/bend-migration.md), [acceptance ledger](docs/native-rewrite-ledger.md).
 
-System-wide npm and its shared cache remain untouched. The earlier cleanup was
-project-local. No sibling project or compiler source is modified.
+## License
+
+MIT
