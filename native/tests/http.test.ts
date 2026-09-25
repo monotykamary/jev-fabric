@@ -1,44 +1,98 @@
 import { test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-const root=resolve('.tmp'); mkdirSync(root,{recursive:true});
-const dir=mkdtempSync(join(root,'native-tls-'));
+import { capture, expectFixture, tempRoot } from './helpers.ts';
+
+const dir = tempRoot('native-tls-');
+const keyFile = join(dir, 'key.pem');
+const certFile = join(dir, 'cert.pem');
+const unreachableProxy = 'http://127.0.0.1:1';
 let server: ReturnType<typeof Bun.serve>;
-const requests: {path:string,auth:string|null,body:string}[]=[];
-const body=JSON.stringify({state:'quotes " slashes \\ newline\n tab\t emoji 🙂; \\nurl = https://invalid.test/'});
-beforeAll(()=>{
- const p=Bun.spawnSync(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-keyout',join(dir,'key.pem'),'-out',join(dir,'cert.pem'),'-days','1','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost'],{stdout:'ignore',stderr:'pipe'});
- expect(p.exitCode, p.stderr.toString()).toBe(0);
- if(process.env.JEV_NATIVE_PREBUILT!=='1'){const build=Bun.spawnSync([resolve('build/jev-fabric'),'--','exec','90000','bend','native/tests/http.bend','-o','build/test-http'],{env:{...process.env,BEND_NO_TELEMETRY:'1'},stdout:'pipe',stderr:'pipe'});
- expect(build.exitCode,build.stdout.toString()+build.stderr.toString()).toBe(0);}
- server=Bun.serve({hostname:'127.0.0.1',port:0,tls:{key:Bun.file(join(dir,'key.pem')),cert:Bun.file(join(dir,'cert.pem'))},async fetch(req){
-  const path=new URL(req.url).pathname;
-  requests.push({path,auth:req.headers.get('authorization'),body:await req.text()});
-  if(path==='/redirect') return new Response('',{status:302,headers:{location:`https://localhost:${server.port}/unexpected`}});
-  if(path==='/huge') return new Response('x'.repeat(1048577));
-  if(path==='/error') return new Response('SYNTHETIC_NOT_A_SECRET',{status:401});
-  if(path==='/slow') await Bun.sleep(2500);
-  return new Response('ok');
- }});
-},100000);
-afterAll(()=>{server?.stop(true);rmSync(dir,{recursive:true,force:true});});
-async function run(path:string,trust=true,host='localhost',input=body){
- const p=Bun.spawn([resolve('build/test-http'),'--',`https://${host}:${server.port}${path}`,input],{env:{PATH:'/usr/bin:/bin',...(trust?{CURL_CA_BUNDLE:join(dir,'cert.pem')}:{}),HTTPS_PROXY:'http://127.0.0.1:1',ALL_PROXY:'http://127.0.0.1:1'},stdout:'pipe',stderr:'pipe'});
- const [out,err,code]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);
- expect(code,err).toBe(0);expect(out+err).not.toContain('SYNTHETIC_NOT_A_SECRET');return out.trim();
+const requests: { path: string; auth: string | null; body: string }[] = [];
+const body = JSON.stringify({
+  state: 'quotes " slashes \\ newline\n tab\t emoji 🙂; \\nurl = https://invalid.test/',
+});
+
+function selfSignedLocalhost() {
+  const p = Bun.spawnSync([
+    'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', keyFile, '-out', certFile, '-days', '1',
+    '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost',
+  ], { stdout: 'ignore', stderr: 'pipe' });
+  expect(p.exitCode, p.stderr.toString()).toBe(0);
 }
-test('native HTTPS verifies trusted TLS and preserves private config/body literally',async()=>{
- expect(await run('/ok')).toBe('ok:2');const req=requests.at(-1)!;expect(req.auth).toBe('Bearer SYNTHETIC_NOT_A_SECRET');expect(req.body).toBe(body);
+
+async function respond(req: Request) {
+  const path = new URL(req.url).pathname;
+  requests.push({ path, auth: req.headers.get('authorization'), body: await req.text() });
+  if (path === '/redirect') {
+    const location = `https://localhost:${server.port}/unexpected`;
+    return new Response('', { status: 302, headers: { location } });
+  }
+  if (path === '/huge') return new Response('x'.repeat(1048577));
+  if (path === '/error') return new Response('SYNTHETIC_NOT_A_SECRET', { status: 401 });
+  if (path === '/slow') await Bun.sleep(2500);
+  return new Response('ok');
+}
+
+beforeAll(() => {
+  selfSignedLocalhost();
+  expectFixture('http');
+  server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    tls: { key: Bun.file(keyFile), cert: Bun.file(certFile) },
+    fetch: respond,
+  });
+}, 100000);
+afterAll(() => {
+  server?.stop(true);
+  rmSync(dir, { recursive: true, force: true });
 });
-test('unknown CA and wrong hostname fail closed',async()=>{
- const n=requests.length;expect(await run('/untrusted',false)).toBe('error');expect(await run('/mismatch',true,'127.0.0.1')).toBe('error');expect(requests.length).toBe(n);
+
+async function run(path: string, trust = true, host = 'localhost', input = body) {
+  const url = `https://${host}:${server.port}${path}`;
+  const env = {
+    PATH: '/usr/bin:/bin',
+    ...(trust ? { CURL_CA_BUNDLE: certFile } : {}),
+    HTTPS_PROXY: unreachableProxy,
+    ALL_PROXY: unreachableProxy,
+  };
+  const { out, err, code } = await capture([resolve('build/test-http'), '--', url, input], { env });
+  expect(code, err).toBe(0);
+  expect(out + err).not.toContain('SYNTHETIC_NOT_A_SECRET');
+  return out.trim();
+}
+
+test('native HTTPS verifies trusted TLS and preserves private config/body literally', async () => {
+  expect(await run('/ok')).toBe('ok:2');
+  const req = requests.at(-1)!;
+  expect(req.auth).toBe('Bearer SYNTHETIC_NOT_A_SECRET');
+  expect(req.body).toBe(body);
 });
-test('redirect is not followed and status errors never expose body',async()=>{
- expect(await run('/redirect')).toBe('error');expect(requests.some(r=>r.path==='/unexpected')).toBe(false);expect(await run('/error')).toBe('error');
+
+test('unknown CA and wrong hostname fail closed', async () => {
+  const n = requests.length;
+  expect(await run('/untrusted', false)).toBe('error');
+  expect(await run('/mismatch', true, '127.0.0.1')).toBe('error');
+  expect(requests.length).toBe(n);
 });
-test('body bounds and network deadline are enforced',async()=>{
- expect(await run('/huge')).toBe('error');const start=Date.now();expect(await run('/slow')).toBe('error');expect(Date.now()-start).toBeLessThan(2300);
+
+test('redirect is not followed and status errors never expose body', async () => {
+  expect(await run('/redirect')).toBe('error');
+  expect(requests.some(r => r.path === '/unexpected')).toBe(false);
+  expect(await run('/error')).toBe('error');
 });
-test('curl data-file syntax rejected before network',async()=>{
- const n=requests.length;expect(await run('/file',true,'localhost','@/etc/passwd')).toBe('error');expect(requests.length).toBe(n);
+
+test('body bounds and network deadline are enforced', async () => {
+  expect(await run('/huge')).toBe('error');
+  const start = Date.now();
+  expect(await run('/slow')).toBe('error');
+  expect(Date.now() - start).toBeLessThan(2300);
+});
+
+test('curl data-file syntax rejected before network', async () => {
+  const n = requests.length;
+  expect(await run('/file', true, 'localhost', '@/etc/passwd')).toBe('error');
+  expect(requests.length).toBe(n);
 });

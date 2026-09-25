@@ -1,29 +1,48 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { capture, expectFixture, nativeBin as bin, processGone, tempRoot } from './helpers.ts';
 
-mkdirSync('.tmp', { recursive: true });
-const root = mkdtempSync(resolve('.tmp/timers-'));
-const bin = resolve('build/jev-fabric');
+const root = tempRoot('timers-');
 const fakeBin = join(root, 'bin');
-const request = JSON.stringify({ state: 'synthetic', questions: { ok: { type: 'noul', instructions: 'Is two plus two four?' } } });
+const timersFixture = resolve('build/test-timers');
+const request = JSON.stringify({
+  state: 'synthetic',
+  questions: { ok: { type: 'noul', instructions: 'Is two plus two four?' } },
+});
 const requestFile = join(root, 'request.json');
 const credential = join(root, 'credential.sh');
+const credentialEnv = {
+  TYPESAFE_API_KEY: '',
+  JEV_CREDENTIAL_COMMAND: JSON.stringify(['/bin/sh', credential]),
+};
 let serial = 0;
 
+const script = (...lines: string[]) => ['#!/bin/sh', ...lines].join('\n') + '\n';
+const fakeReply = JSON.stringify({
+  model: 'test',
+  answers: { ok: { type: 'noul', noul: 0.99 } },
+  usage: { input_tokens: 4, output_tokens: 2 },
+});
+// Records the private max-time config line, optionally stalls, then answers 200.
+const fakeCurl = script(
+  `/usr/bin/sed -n 's/^max-time = //p' >> "$CURL_RECORD"`,
+  '/bin/sleep "${CURL_DELAY:-0}"',
+  `printf '%s\\n200' '${fakeReply}'`,
+);
+
 beforeAll(async () => {
-  if (process.env.JEV_NATIVE_PREBUILT !== '1') {
-    for (const name of ['time-core', 'timers']) {
-      const p = Bun.spawnSync([bin, '--', 'exec', '300000', 'bend', `native/tests/${name}.bend`, '-o', `build/test-${name}`], { stdout: 'pipe', stderr: 'pipe' });
-      expect(p.exitCode, p.stdout.toString() + p.stderr.toString()).toBe(0);
-    }
-  }
+  for (const name of ['time-core', 'timers']) expectFixture(name, 300000);
   mkdirSync(fakeBin);
   await Bun.write(requestFile, request);
-  await Bun.write(join(fakeBin, 'curl'), '#!/bin/sh\n/usr/bin/sed -n \'s/^max-time = //p\' >> "$CURL_RECORD"\n/bin/sleep "${CURL_DELAY:-0}"\nprintf \'%s\\n200\' \'{"model":"test","answers":{"ok":{"type":"noul","noul":0.99}},"usage":{"input_tokens":4,"output_tokens":2}}\'\n');
-  await Bun.write(credential, '#!/bin/sh\nprintf x >> "$CREDENTIAL_RECORD"\nprintf "SYNTHETIC_TIMER_KEY\\n"\n');
-  await Bun.write(join(fakeBin, '123'), '#!/bin/sh\nprintf "%s\\n" "$@"\n');
-  await Bun.write(join(fakeBin, '--stdin'), '#!/bin/sh\nprintf "literal-command:%s\\n" "$1"\n');
+  await Bun.write(join(fakeBin, 'curl'), fakeCurl);
+  await Bun.write(credential, script(
+    'printf x >> "$CREDENTIAL_RECORD"',
+    'printf "SYNTHETIC_TIMER_KEY\\n"',
+  ));
+  // Commands whose names look like a deadline or an option must still run literally.
+  await Bun.write(join(fakeBin, '123'), script('printf "%s\\n" "$@"'));
+  await Bun.write(join(fakeBin, '--stdin'), script('printf "literal-command:%s\\n" "$1"'));
   for (const name of ['curl', '123', '--stdin']) chmodSync(join(fakeBin, name), 0o700);
   chmodSync(credential, 0o700);
 }, 610000);
@@ -32,26 +51,36 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 type Options = { env?: Record<string, string>; input?: string; program?: string };
 async function run(args: string[], options: Options = {}) {
   const id = serial++;
-  const curl = join(root, `curl-${id}`), cred = join(root, `cred-${id}`);
-  const p = Bun.spawn([options.program ?? bin, '--', ...args], {
-    env: { PATH: `${fakeBin}:${process.env.PATH}`, BEND_NO_TELEMETRY: '1', JEV_FABRIC_HOME: join(root, 'jobs'), TYPESAFE_API_KEY: 'SYNTHETIC_TIMER_KEY', CURL_RECORD: curl, CREDENTIAL_RECORD: cred, ...options.env },
-    stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
-  });
-  p.stdin.write(options.input ?? '');
-  await p.stdin.end();
-  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  const curl = join(root, `curl-${id}`);
+  const cred = join(root, `cred-${id}`);
+  const env = {
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    BEND_NO_TELEMETRY: '1',
+    JEV_FABRIC_HOME: join(root, 'jobs'),
+    TYPESAFE_API_KEY: 'SYNTHETIC_TIMER_KEY',
+    CURL_RECORD: curl,
+    CREDENTIAL_RECORD: cred,
+    ...options.env,
+  };
+  const argv = [options.program ?? bin, '--', ...args];
+  const { out, err, code } = await capture(argv, { env, input: options.input ?? '' });
   expect(out + err).not.toContain('SYNTHETIC_TIMER_KEY');
-  return { out, err, code, curls: existsSync(curl) ? readFileSync(curl, 'utf8').trim().split('\n').map(x => x.split(' ')) : [], credentials: existsSync(cred) ? readFileSync(cred, 'utf8') : '' };
+  const curls = existsSync(curl)
+    ? readFileSync(curl, 'utf8').trim().split('\n').map(x => x.split(' '))
+    : [];
+  return { out, err, code, curls, credentials: existsSync(cred) ? readFileSync(cred, 'utf8') : '' };
 }
 // curl's private stdin config rounds up; the native supervisor enforces exact ms.
 function seconds(args: string[]) { return Number(args[0]); }
-function gone(pid: number) {
-  try { process.kill(pid, 0); return false; } catch (e: any) { return e.code === 'ESRCH'; }
-}
+const lastLine = (text: string) => text.trim().split('\n').at(-1)!;
 
 test('public defaults and checked pure deadline/CLI policy are registered', async () => {
   const help = await run(['--help']);
-  for (const text of ['--timeout-ms', 'work 1h', 'Jev 30s', 'wait 30s', 'watch 5s', 'JEV_FABRIC_TIMEOUT_MS', 'JEV_FABRIC_JEV_TIMEOUT_MS', 'JEV_FABRIC_WAIT_MS', 'JEV_FABRIC_WATCH_MS']) expect(help.out).toContain(text);
+  const documented = [
+    '--timeout-ms', 'work 1h', 'Jev 30s', 'wait 30s', 'watch 5s',
+    'JEV_FABRIC_TIMEOUT_MS', 'JEV_FABRIC_JEV_TIMEOUT_MS', 'JEV_FABRIC_WAIT_MS', 'JEV_FABRIC_WATCH_MS',
+  ];
+  for (const text of documented) expect(help.out).toContain(text);
   const p = await run([], { program: resolve('build/test-time-core') });
   expect(p.code, p.err).toBe(0);
   expect(p.out).toContain('native timer policy assertions: 24');
@@ -80,7 +109,9 @@ test('configured work limits and explicit overrides remain effective; malformed 
   expect(timed.code).toBe(124);
   expect(JSON.parse(timed.out).timedOut).toBe(true);
   for (const prefix of [['300'], ['--timeout-ms', '300']]) {
-    const override = await run(['exec', ...prefix, '/bin/sleep', '0.08'], { env: { JEV_FABRIC_TIMEOUT_MS: 'invalid' } });
+    const override = await run(['exec', ...prefix, '/bin/sleep', '0.08'], {
+      env: { JEV_FABRIC_TIMEOUT_MS: 'invalid' },
+    });
     expect(override.code, override.err).toBe(0);
   }
   const marker = join(root, 'must-not-run');
@@ -93,20 +124,35 @@ test('configured work limits and explicit overrides remain effective; malformed 
       expect(existsSync(marker)).toBe(false);
     }
   }
-  for (const args of [['exec', '--timeout-ms'], ['exec', '--stdin', '--stdin', '/bin/echo'], ['exec', '--timeout-ms', '3', '4', '/bin/echo'], ['start', '--stdin', '/bin/echo']]) expect((await run(args)).code).not.toBe(0);
+  const malformed = [
+    ['exec', '--timeout-ms'],
+    ['exec', '--stdin', '--stdin', '/bin/echo'],
+    ['exec', '--timeout-ms', '3', '4', '/bin/echo'],
+    ['start', '--stdin', '/bin/echo'],
+  ];
+  for (const args of malformed) expect((await run(args)).code).not.toBe(0);
   expect((await run(['--help'], { env: { JEV_FABRIC_TIMEOUT_MS: 'invalid' } })).code).toBe(0);
 });
 
 test('timer-free run compiles and preserves source arguments', async () => {
   const file = join(root, 'source.bend');
-  await Bun.write(file, 'import Base\ndef main() -> IO(Unit):\n  do IO<Unit>:\n    args : List<String> <- IO.args()\n    IO.print(List.show(&1, String, text => text, args))\n');
+  await Bun.write(file, [
+    'import Base',
+    'def main() -> IO(Unit):',
+    '  do IO<Unit>:',
+    '    args : List<String> <- IO.args()',
+    '    IO.print(List.show(&1, String, text => text, args))',
+    '',
+  ].join('\n'));
   const r = await run(['run', file, '--timeout-ms', 'child-argument']);
   expect(r.code, r.err).toBe(0);
   expect(JSON.parse(r.out).stdout).toContain('child-argument');
 });
 
 test('timer-free detached lifecycle; wait/watch limits do not stop or renew the job', async () => {
-  const started = await run(['start', '/bin/sh', '-c', 'printf "ready\\n"; exec sleep 60'], { env: { JEV_FABRIC_TIMEOUT_MS: '3000' } });
+  const started = await run(['start', '/bin/sh', '-c', 'printf "ready\\n"; exec sleep 60'], {
+    env: { JEV_FABRIC_TIMEOUT_MS: '3000' },
+  });
   expect(started.code, started.err).toBe(0);
   const { id } = JSON.parse(started.out);
   try {
@@ -114,20 +160,31 @@ test('timer-free detached lifecycle; wait/watch limits do not stop or renew the 
     expect(JSON.parse(waited.out).state).toBe('running');
     const watched = await run(['watch', id, 'ready'], { env: { JEV_FABRIC_WATCH_MS: '50' } });
     expect(watched.code, watched.err).toBe(0);
-    expect(JSON.parse(watched.out.trim().split('\n').at(-1)!)).toMatchObject({ type: 'monitor.end', reason: 'deadline', terminal: false });
+    expect(JSON.parse(lastLine(watched.out))).toMatchObject({
+      type: 'monitor.end',
+      reason: 'deadline',
+      terminal: false,
+    });
     expect(JSON.parse((await run(['status', id])).out).state).toBe('running');
     expect((await run(['watch', '--timeout-ms', '300001', id, 'ready'])).code).toBe(2);
     expect((await run(['wait', id], { env: { JEV_FABRIC_WAIT_MS: 'invalid' } })).code).toBe(2);
-  } finally { await run(['stop', id]); }
+  } finally {
+    await run(['stop', id]);
+  }
   const done = await run(['start', '/bin/echo', 'ready']);
   const quick = JSON.parse(done.out).id;
   expect(JSON.parse((await run(['wait', quick])).out).state).toBe('exited');
   const watched = await run(['watch', quick, 'ready']);
-  expect(JSON.parse(watched.out.trim().split('\n').at(-1)!)).toMatchObject({ terminal: true });
+  expect(JSON.parse(lastLine(watched.out))).toMatchObject({ terminal: true });
 });
 
 test('timer-free Jev and its override reach only the fake transport with bounded deadlines', async () => {
-  for (const [prefix, env, max] of [[[], {}, 30], [[], { JEV_FABRIC_JEV_TIMEOUT_MS: '2000' }, 2], [['--timeout-ms', '300'], { JEV_FABRIC_JEV_TIMEOUT_MS: 'invalid' }, 0.3]] as [string[], Record<string, string>, number][]) {
+  const cases: [string[], Record<string, string>, number][] = [
+    [[], {}, 30],
+    [[], { JEV_FABRIC_JEV_TIMEOUT_MS: '2000' }, 2],
+    [['--timeout-ms', '300'], { JEV_FABRIC_JEV_TIMEOUT_MS: 'invalid' }, 0.3],
+  ];
+  for (const [prefix, env, max] of cases) {
     const r = await run(['jev', ...prefix, requestFile, '100'], { env });
     expect(r.code, r.err).toBe(0);
     expect(r.curls.length).toBe(1);
@@ -136,7 +193,9 @@ test('timer-free Jev and its override reach only the fake transport with bounded
     expect(JSON.parse(r.out).answers.ok.noul).toBe(0.99);
   }
   const began = Date.now();
-  const slow = await run(['jev', requestFile], { env: { JEV_FABRIC_JEV_TIMEOUT_MS: '50', CURL_DELAY: '1' } });
+  const slow = await run(['jev', requestFile], {
+    env: { JEV_FABRIC_JEV_TIMEOUT_MS: '50', CURL_DELAY: '1' },
+  });
   expect(slow.code).not.toBe(0);
   expect(Date.now() - began).toBeLessThan(1000);
   const bad = await run(['jev', requestFile], { env: { JEV_FABRIC_JEV_TIMEOUT_MS: 'invalid' } });
@@ -145,7 +204,10 @@ test('timer-free Jev and its override reach only the fake transport with bounded
 });
 
 test('public timer-free Process, Session, Jev and Scope APIs execute with configured defaults', async () => {
-  const r = await run(['defaults'], { program: resolve('build/test-timers'), env: { JEV_FABRIC_TIMEOUT_MS: '1000', JEV_FABRIC_JEV_TIMEOUT_MS: '700' } });
+  const r = await run(['defaults'], {
+    program: timersFixture,
+    env: { JEV_FABRIC_TIMEOUT_MS: '1000', JEV_FABRIC_JEV_TIMEOUT_MS: '700' },
+  });
   expect(r.code, r.err).toBe(0);
   const rows = r.out.trim().split('\n');
   expect(JSON.parse(rows[0]!).stdout).toBe('buffered\n');
@@ -158,13 +220,18 @@ test('public timer-free Process, Session, Jev and Scope APIs execute with config
 test('shared budgets expire, reap processes/sessions and block new effects without charging Jev', async () => {
   const marker = join(root, 'expired-launch');
   const began = Date.now();
-  const r = await run(['scope', marker], { program: resolve('build/test-timers'), env: { TYPESAFE_API_KEY: '', JEV_CREDENTIAL_COMMAND: JSON.stringify(['/bin/sh', credential]) } });
+  const r = await run(['scope', marker], { program: timersFixture, env: credentialEnv });
   expect(r.code, r.err).toBe(0);
   expect(Date.now() - began).toBeLessThan(2000);
   const reports = r.out.trim().split('\n').filter(x => x.startsWith('{')).map(x => JSON.parse(x));
   expect(reports.length).toBe(4);
   for (const row of reports) expect(row).toMatchObject({ exitCode: 124, timedOut: true });
-  for (const row of [reports[0], reports[1], reports[3]]) { const pid = Number(row.stdout.trim()); expect(pid).toBeGreaterThan(1); expect(gone(pid)).toBe(true); }
+  // Reports 0, 1 and 3 printed their own PID before the budget expired; 2 never launched.
+  for (const row of [reports[0], reports[1], reports[3]]) {
+    const pid = Number(row.stdout.trim());
+    expect(pid).toBeGreaterThan(1);
+    expect(processGone(pid)).toBe(true);
+  }
   expect(reports[2].stdout).toBe('');
   expect(existsSync(marker)).toBe(false);
   expect(r.credentials).toBe('');
@@ -174,7 +241,10 @@ test('shared budgets expire, reap processes/sessions and block new effects witho
 });
 
 test('scoped Jev deadlines share remaining time, preserve credential cache and restore local caps', async () => {
-  const r = await run(['jev', request], { program: resolve('build/test-timers'), env: { TYPESAFE_API_KEY: '', JEV_CREDENTIAL_COMMAND: JSON.stringify(['/bin/sh', credential]), JEV_FABRIC_JEV_TIMEOUT_MS: '10000' } });
+  const r = await run(['jev', request], {
+    program: timersFixture,
+    env: { ...credentialEnv, JEV_FABRIC_JEV_TIMEOUT_MS: '10000' },
+  });
   expect(r.code, r.err).toBe(0);
   expect(r.credentials).toBe('x');
   expect(r.curls.length).toBe(2);
