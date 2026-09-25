@@ -4,6 +4,11 @@ import { Shell, type ShellOptions } from './process.js';
 import type { FabricEvent, Json, RunState } from './types.js';
 import { asJson, message, sleep } from './util.js';
 
+const PROGRAM_EVENT_CAPACITY = 128;
+const MAX_HANDOFF_REASON_LENGTH = 2000;
+const MAX_EVIDENCE_BYTES = 16384;
+const MAX_RESULT_BYTES = 32768;
+
 export interface ProgramContext {
   readonly input: Json;
   readonly signal: AbortSignal;
@@ -34,31 +39,47 @@ export interface ProgramOutcome {
   evaluations: number;
   usage: { input_tokens: number; output_tokens: number };
 }
+type Settlement = Omit<ProgramOutcome, 'usage' | 'evaluations'>;
+
+function unsuccessfulOutcome(error: unknown, aborted: boolean): Settlement {
+  if (aborted) return { state: 'cancelled' };
+  if (error instanceof Handoff) {
+    return { state: 'needs_attention', result: { reason: error.message, evidence: error.evidence } };
+  }
+  return { state: 'failed', error: message(error) };
+}
 /** In-process library API. Use the CLI supervisor for a hard wall-clock limit on native code. */
 export async function runProgram(program: Program, options: ProgramOptions = {}): Promise<ProgramOutcome> {
   const controller = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-  const events = new EventBus(128, options.onEvent);
+  const events = new EventBus(PROGRAM_EVENT_CAPACITY, options.onEvent);
   const shell = new Shell({ signal, cwd: options.cwd, events, onProcess: options.onProcess });
   const jev = new JevClient({ ...options.jev, signal, onUsage: stats => events.emit('jev.usage', stats) });
-  let outcome: Omit<ProgramOutcome, 'usage' | 'evaluations'>;
+  let outcome: Settlement;
   try {
     signal.throwIfAborted();
     const result = await program({
-      input: asJson(options.input ?? null), signal, shell, jev, events,
-      emit: (type, data = null) => { signal.throwIfAborted(); events.emit(type, data); },
+      input: asJson(options.input ?? null),
+      signal,
+      shell,
+      jev,
+      events,
+      emit: (type, data = null) => {
+        signal.throwIfAborted();
+        events.emit(type, data);
+      },
       sleep: ms => sleep(ms, signal),
       handoff: (reason, evidence = null) => {
-        if (!reason || reason.length > 2000) throw new Error('Handoff reason must be 1..2000 characters');
-        throw new Handoff(asJson(evidence, 16384), reason);
+        if (!reason || reason.length > MAX_HANDOFF_REASON_LENGTH) {
+          throw new Error('Handoff reason must be 1..2000 characters');
+        }
+        throw new Handoff(asJson(evidence, MAX_EVIDENCE_BYTES), reason);
       },
     });
     signal.throwIfAborted();
-    outcome = { state: 'completed', result: asJson(result, 32768) };
+    outcome = { state: 'completed', result: asJson(result, MAX_RESULT_BYTES) };
   } catch (error) {
-    outcome = signal.aborted ? { state: 'cancelled' }
-      : error instanceof Handoff ? { state: 'needs_attention', result: { reason: error.message, evidence: error.evidence } }
-      : { state: 'failed', error: message(error) };
+    outcome = unsuccessfulOutcome(error, signal.aborted);
   } finally {
     controller.abort(new Error('Program settled'));
     await shell.close();
