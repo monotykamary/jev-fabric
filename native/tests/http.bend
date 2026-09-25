@@ -12,8 +12,13 @@ def dispatch(args: List<String>) -> IO(Unit):
   match args:
     case Con{url, Con{body, Nil{}}}:
       do IO<Unit>:
-        r : Result<&1, &1, U32 & String, List<&2, U32>> <- Http.post(url, "SYNTHETIC_NOT_A_SECRET", body, 1500)
-        show(r)
+        reply : Result<&1, &1, U32 & String, List<&2, U32>> <- Http.post(
+          url,
+          "SYNTHETIC_NOT_A_SECRET",
+          body,
+          1500
+        )
+        show(reply)
     case other:
       IO.die(Unit, 2, "expected URL and JSON body")
 

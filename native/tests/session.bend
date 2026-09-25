@@ -34,7 +34,12 @@ def reported(value: S.Outcome) -> IO(Unit):
     case Done{report}:
       IO.print(P.show(report))
 
-def received(session: S.Session, next: S.Session -> IO(S.Session), expected: String, found: Bool) -> IO(S.Session):
+def received(
+  session: S.Session,
+  next: S.Session -> IO(S.Session),
+  expected: String,
+  found: Bool,
+) -> IO(S.Session):
   match found:
     case True{}:
       do IO<S.Session>:
@@ -45,7 +50,11 @@ def received(session: S.Session, next: S.Session -> IO(S.Session), expected: Str
         IO.sleep(10)
         next(session)
 
-def observed(pair: S.Session & S.Bytes, next: S.Session -> IO(S.Session), +expected: String) -> IO(S.Session):
+def observed(
+  pair: S.Session & S.Bytes,
+  next: S.Session -> IO(S.Session),
+  +expected: String,
+) -> IO(S.Session):
   (session, bytes) = pair
   do IO<S.Session>:
     raw : List<&2, U32> <- IO.pass(List<&2, U32>, bytes)
@@ -61,9 +70,18 @@ def await_text(fuel: Nat, session: S.Session, +expected: String) -> IO(S.Session
         pair : S.Session & S.Bytes <- S.read_stdout(session, 0, 65536)
         observed(pair, next => await_text(rest, next, expected), expected)
 
+# Prints "ready", then answers each stdin line with a running count as JSONL.
+def counter() -> List<String>:
+  [
+    "/bin/sh",
+    "-c",
+    "printf 'ready\\n'; i=0; while IFS= read -r x; do i=$((i+1)); "
+      ++ "printf '{\"count\":%s,\"value\":%s}\\n' \"$i\" \"$x\"; done"
+  ]
+
 def handshake() -> IO(Unit):
   do IO<Unit>:
-    first : S.Session <- S.start(["/bin/sh", "-c", "printf 'ready\\n'; i=0; while IFS= read -r x; do i=$((i+1)); printf '{\"count\":%s,\"value\":%s}\\n' \"$i\" \"$x\"; done"], 5000)
+    first : S.Session <- S.start(counter(), 5000)
     ready : S.Session <- await_text(100n, first, "ready")
     sent : S.Session <- send(ready, "10\n", False{})
     reply : S.Session <- await_text(100n, sent, "\"count\":1")

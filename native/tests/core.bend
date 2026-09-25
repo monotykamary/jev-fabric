@@ -19,7 +19,9 @@ def has_line(value: Maybe<&2, String>) -> Bool:
 def batch_ok(batch: Core.Batch) -> Bool:
   match batch:
     case Core.Batch{lines, omitted, clipped}:
-      Nat.is_eq(List.length(&2, String, lines), 2n) && Nat.is_eq(omitted, 1n) && Nat.is_eq(clipped, 0n)
+      Nat.is_eq(List.length(&2, String, lines), 2n)
+        && Nat.is_eq(omitted, 1n)
+        && Nat.is_eq(clipped, 0n)
 
 def clipping_ok(batch: Core.Batch) -> Bool:
   match batch:
@@ -27,6 +29,12 @@ def clipping_ok(batch: Core.Batch) -> Bool:
       Nat.is_eq(String.length(line), 100n) && Nat.is_eq(omitted, 0n) && Nat.is_eq(clipped, 1n)
     case batch:
       False{}
+
+def split_ab() -> List<&2, Core.Probability>:
+  [Core.Probability{"a", 0.75}, Core.Probability{"b", 0.25}]
+
+def split_01() -> List<&2, Core.Probability>:
+  [Core.Probability{"0", 0.2}, Core.Probability{"1", 0.8}]
 
 def check(tests: List<&2, Bool>, n: Nat) -> IO(Unit):
   match tests:
@@ -47,17 +55,26 @@ def main() -> IO(Unit):
     Bool.not(Core.probability(1.1)),
     Bool.not(Core.probability(F32.div(0.0, 0.0))),
     Bool.not(Core.probability(F32.div(1.0, 0.0))),
-    Core.choice(["a", "b"], "a", 0.9, [Core.Probability{"a", 0.75}, Core.Probability{"b", 0.25}]),
-    Bool.not(Core.choice(["a", "b"], "missing", 0.9, [Core.Probability{"a", 0.75}, Core.Probability{"b", 0.25}])),
-    Bool.not(Core.choice(["a", "b"], "a", 0.9, [Core.Probability{"a", 0.75}, Core.Probability{"a", 0.25}])),
+    Core.choice(["a", "b"], "a", 0.9, split_ab()),
+    Bool.not(Core.choice(["a", "b"], "missing", 0.9, split_ab())),
+    Bool.not(Core.choice(
+      ["a", "b"],
+      "a",
+      0.9,
+      [Core.Probability{"a", 0.75}, Core.Probability{"a", 0.25}]
+    )),
     Bool.not(Core.choice(["a"], "a", 1.0, [Core.Probability{"a", 0.2}])),
-    Core.score(2n, 0.8, 0.7, [Core.Probability{"0", 0.2}, Core.Probability{"1", 0.8}]),
-    Bool.not(Core.score(2n, 2.0, 0.7, [Core.Probability{"0", 0.2}, Core.Probability{"1", 0.8}])),
+    Core.score(2n, 0.8, 0.7, split_01()),
+    Bool.not(Core.score(2n, 2.0, 0.7, split_01())),
     Bool.not(has_line(Core.monitor("quiet", "STATUS:", ""))),
     Bool.not(has_line(Core.monitor("STATUS: ready", "STATUS:", "STATUS: ready"))),
     has_line(Core.monitor("STATUS: ready", "STATUS:", "")),
     batch_ok(Core.batch_push(Core.Batch{["b", "a"], 0n, 0n}, "c", 2n)),
-    clipping_ok(Core.batch_push(Core.Batch{Nil{}, 0n, 0n}, "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789", 2n)),
+    clipping_ok(Core.batch_push(
+      Core.Batch{Nil{}, 0n, 0n},
+      String.repeat("0123456789", 11n),
+      2n
+    )),
     String.eq(Json.quote("a\"b\\c\n"), "\"a\\\"b\\\\c\\u000a\""),
     String.eq(Json.quote("🙂"), "\"🙂\"")
   ], 0n)

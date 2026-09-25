@@ -19,7 +19,9 @@ def main() -> IO(Unit):
   do IO<Unit>:
     assert(String.eq(decode([65, 0, 66]), "A\u{0}B"))
     assert(String.eq(decode([240, 159, 153, 130]), "🙂"))
-    assert(String.eq(resume(Streams.take(Streams.feed([65, 240, 159], Streams.empty())), [153, 130, 66]), "A🙂B"))
+    # U+1F642 split across two reads: the first holds back its incomplete prefix.
+    split : Streams.Decoder & String = Streams.take(Streams.feed([65, 240, 159], Streams.empty()))
+    assert(String.eq(resume(split, [153, 130, 66]), "A🙂B"))
     assert(String.eq(decode([240, 159]), "�"))
     assert(String.eq(decode([255, 65]), "�A"))
     assert(String.eq(decode([237, 160, 128]), "�"))

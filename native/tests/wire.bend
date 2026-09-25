@@ -26,7 +26,12 @@ def request_text() -> String:
   "{\"state\":{},\"questions\":{\"q\":{\"type\":\"noul\",\"instructions\":\"x\"}}}"
 
 def response_text(n: String) -> String:
-  "{\"model\":\"jev\",\"answers\":{\"q\":{\"type\":\"noul\",\"noul\":" ++ n ++ "}},\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}"
+  "{\"model\":\"jev\",\"answers\":{\"q\":{\"type\":\"noul\",\"noul\":" ++ n
+    ++ "}},\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}"
+
+# A one-question request with array state around a raw question object.
+def question_request(question: String) -> String:
+  "{\"state\":[],\"questions\":{\"q\":" ++ question ++ "}}"
 
 def response(text: String) -> Result<&1, &1, U32 & String, J.JSON>:
   do Result<&1, &1, U32 & String, J.JSON>:
@@ -48,10 +53,16 @@ def main() -> IO(Unit):
     Bool.not(ok(Wire.request("{}"))),
     Bool.not(ok(Wire.request("{\"state\":null,\"questions\":{}}"))),
     Bool.not(ok(Wire.request("{\"state\":{},\"questions\":{}}"))),
-    ok(Wire.request("{\"state\":[],\"questions\":{\"q\":{\"type\":\"choice\",\"instructions\":{},\"criteria\":{\"a\":null}}}}")),
-    ok(Wire.request("{\"state\":[],\"questions\":{\"q\":{\"type\":\"score\",\"instructions\":{},\"criteria\":[\"a\",{}]}}}")),
-    Bool.not(ok(Wire.request("{\"state\":[],\"questions\":{\"q\":{\"type\":\"score\",\"instructions\":{},\"criteria\":[\"a\"]}}}"))),
-    Bool.not(ok(Wire.request("{\"state\":[],\"questions\":{\"q\":{\"type\":\"text\",\"instructions\":{}}}}"))),
+    ok(Wire.request(question_request(
+      "{\"type\":\"choice\",\"instructions\":{},\"criteria\":{\"a\":null}}"
+    ))),
+    ok(Wire.request(question_request(
+      "{\"type\":\"score\",\"instructions\":{},\"criteria\":[\"a\",{}]}"
+    ))),
+    Bool.not(ok(Wire.request(question_request(
+      "{\"type\":\"score\",\"instructions\":{},\"criteria\":[\"a\"]}"
+    )))),
+    Bool.not(ok(Wire.request(question_request("{\"type\":\"text\",\"instructions\":{}}")))),
     number(numeric("0.125", 12n, Wire.unit()), Nat.mul(125000n, 1000000n)),
     number(numeric("1e0", 12n, Wire.unit()), Wire.unit()),
     number(numeric("1000e-3", 12n, Wire.unit()), Wire.unit()),
@@ -70,5 +81,7 @@ def main() -> IO(Unit):
     Bool.not(ok(response(response_text("-1e-1000")))),
     Bool.not(ok(response(response_text("1.0000000000000000000001")))),
     Bool.not(ok(response(response_text("true")))),
-    Bool.not(ok(response("{\"model\":42,\"answers\":{},\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}")))
+    Bool.not(ok(response(
+      "{\"model\":42,\"answers\":{},\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}"
+    )))
   ], 0n)
