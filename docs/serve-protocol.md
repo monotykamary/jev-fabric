@@ -30,7 +30,7 @@ an invalid provider configuration exit (code 2 or 1) before the banner.
 The first output line is the banner. Read it before sending requests:
 
 ```json
-{"ready":{"protocol":1,"version":"0.3.0-native","timeoutMs":3600000,"maxEvaluations":1,"maxTokens":100000}}
+{"ready":{"protocol":1,"version":"0.3.1-native","timeoutMs":3600000,"maxEvaluations":1,"maxTokens":100000}}
 ```
 
 The session ends when stdin closes (exit 0). It also ends when its deadline has
@@ -137,5 +137,5 @@ milliseconds). Children inherit the session's environment, including
 - Nothing calls Jev implicitly: only a `jev` request does.
 - Output is bounded exactly as in the CLI (32 KiB receipt tails, 64 retained
   events, `watch` limits). Each CLI step's stdout is also capped at 1 MiB.
-- stdin must be a pipe or file that `/dev/stdin` can reopen, which is true of
-  ordinary child-process pipes.
+- stdin may be a pipe, a socket (as Node, Bun and libuv children get), a
+  terminal or a file: `serve` reads a duplicate of its inherited descriptor.

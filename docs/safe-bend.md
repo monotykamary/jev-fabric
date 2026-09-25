@@ -43,9 +43,9 @@ behavior, of the code generator, or of runtime memory safety.
   certified by the pure proofs. This is not an assertion that all orchestration
   behavior has been modeled or proved.
 
-The exact nine foreign declarations are allowlisted in `native/trust.json`:
-six in `Process.bend`, two in `Host.bend`, one in `Http.bend`. Their
-implementations total 1461 physical C lines. IO wrappers still legitimately produce Bend's combined
+The exact ten foreign declarations are allowlisted in `native/trust.json`:
+seven in `Process.bend`, two in `Host.bend`, one in `Http.bend`. Their
+implementations total 1482 physical C lines. IO wrappers still legitimately produce Bend's combined
 "unsafe or foreign code" warning; with no project unsafe definitions remaining,
 the project boundary is foreign code. We do not suppress that warning.
 

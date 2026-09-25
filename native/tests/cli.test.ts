@@ -44,7 +44,7 @@ test('public native help registers execution, source, validation, Jev, job and s
   expect(r.code).toBe(0);
   const verbs = ['exec', 'run', 'validate', 'jev', 'start', 'status', 'events', 'wait', 'stop', 'watch', 'serve', 'update'];
   for (const cmd of verbs) expect(r.out).toContain(cmd);
-  expect((await run(['--version'])).out).toContain('0.3.0-native');
+  expect((await run(['--version'])).out).toContain('0.3.1-native');
   expect(manifest.bin['jev-fabric']).toBe('build/jev-fabric');
   expect(Object.keys(manifest.bin)).toEqual(['jev-fabric']);
   expect(manifest.scripts.demo).toContain('examples/native/pipeline.bend');

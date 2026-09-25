@@ -1,7 +1,7 @@
 import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { nativeBin, tempRoot } from './helpers.ts';
+import { capture, nativeBin, tempRoot } from './helpers.ts';
 
 // Conformance tests for `serve`, the JSONL session protocol (docs/serve-protocol.md).
 const root = tempRoot('native-serve-');
@@ -99,13 +99,34 @@ async function session(args: string[] = [], env: Env = {}) {
 test('serve announces its protocol, version, deadline and budgets', async () => {
   const { s, banner } = await session(['--timeout-ms', '60000', '3', '500']);
   expect(banner).toEqual({
-    ready: { protocol: 1, version: '0.3.0-native', timeoutMs: 60000, maxEvaluations: 3, maxTokens: 500 },
+    ready: { protocol: 1, version: '0.3.1-native', timeoutMs: 60000, maxEvaluations: 3, maxTokens: 500 },
   });
   expect(await s.close()).toEqual({ code: 0, err: '' });
 
   const defaults = await session();
   expect(defaults.banner.ready).toMatchObject({ timeoutMs: 3600000, maxEvaluations: 1, maxTokens: 100000 });
   await defaults.s.close();
+});
+
+// Node, Bun and libuv give children a socketpair, not a pipe, and Linux cannot
+// reopen /dev/stdin on a socket; serve must read its inherited descriptor.
+test('serve reads a socket stdin, as Node and Bun children have', async () => {
+  const script = `
+import json, socket, subprocess, sys
+a, b = socket.socketpair()
+p = subprocess.Popen([sys.argv[1], '--', 'serve'], stdin=b, stdout=subprocess.PIPE)
+b.close()
+banner = json.loads(p.stdout.readline())
+a.sendall(b'{"id":1,"op":"exec","argv":["/bin/echo","socket"]}\\n')
+reply = json.loads(p.stdout.readline())
+a.shutdown(socket.SHUT_WR)
+print(json.dumps({"protocol": banner["ready"]["protocol"], "stdout": reply["result"]["stdout"], "code": p.wait()}))
+`;
+  const r = await capture(['python3', '-c', script, nativeBin], {
+    env: { PATH: process.env.PATH!, BEND_NO_TELEMETRY: '1', JEV_FABRIC_HOME: home },
+  });
+  expect(r.code, r.out + r.err).toBe(0);
+  expect(JSON.parse(r.out)).toEqual({ protocol: 1, stdout: 'socket\n', code: 0 });
 });
 
 test('invalid session options fail before the banner', async () => {

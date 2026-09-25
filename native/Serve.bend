@@ -268,7 +268,7 @@ def launch(+ms: U32, budget: U32 & U32) -> IO(Unit):
     work : U32 <- Time.work()
     wait : U32 <- Time.wait()
     watch : U32 <- Time.watch()
-    input : File <- IO.try(File, File.open("/dev/stdin", "r"))
+    input : File <- IO.try(File, Process.stdin())
     context : Context = Context{executable, budget, Core.Defaults{work, wait, watch}}
     IO.print(Core.banner(Cli.version(), ms, calls, tokens))
     loop(Core.reads_max(), context, Serving{input, client, Nil{}, 0})

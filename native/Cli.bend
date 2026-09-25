@@ -7,7 +7,7 @@ def Error() -> Type:
   U32 & String
 
 def version() -> String:
-  "0.3.0-native"
+  "0.3.1-native"
 
 type Options is Type:
   Options{args: List<String>, timeout: Maybe<&2, U32>, input: Bool, literal: Bool}

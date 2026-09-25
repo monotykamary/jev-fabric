@@ -33,9 +33,10 @@ is no custom HTTP/TLS implementation or compiler fork. Research and source links
 cancellable IO, bounded raw capture/spools, signals and descriptor cleanup.
 `native/host.c` handles private no-follow filesystem operations, atomic file
 replacement, random job IDs, advisory ownership leases, self-executable lookup
-and detached spawn. A 26-line `native/pipe.c` supplies owned pipe descriptors,
-and `native/http.c` (330 lines) drives the system libcurl for pooled HTTPS.
-Together these are 1461 physical C lines; none parses Jev JSON or decides
+and detached spawn. A 47-line `native/pipe.c` supplies owned pipe descriptors
+and a duplicate of stdin, and `native/http.c` (330 lines) drives the system
+libcurl for pooled HTTPS.
+Together these are 1482 physical C lines; none parses Jev JSON or decides
 application policy.
 
 Bend owns credentials, provider routes, curl config escaping, deadlines/budgets,

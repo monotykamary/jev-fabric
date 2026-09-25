@@ -15,7 +15,7 @@
   "foreign": {
     "native/Process.bend": {
       "Native.exec": "native/posix.c", "Native.capture": "native/posix.c",
-      "Native.pipe": "native/pipe.c", "Native.cancel": "native/posix.c",
+      "Native.pipe": "native/pipe.c", "Native.stdin": "native/pipe.c", "Native.cancel": "native/posix.c",
       "Native.exec_logged": "native/posix.c", "Native.exec_pipe": "native/posix.c"
     },
     "native/Host.bend": {"jfh_os": "native/host.c", "jfh_spool": "native/host.c"},

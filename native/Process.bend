@@ -41,6 +41,15 @@ def Native.pipe() -> IO(Result<&1, &1, U32 & String, File & File>):
 def pipe() -> IO(Result<&1, &1, U32 & String, File & File>):
   Native.pipe()
 
+# This process's standard input as an owned File: a CLOEXEC duplicate of fd 0,
+# readable whether fd 0 is a pipe, socket, terminal or file. Closing it leaves
+# fd 0 open.
+def Native.stdin() -> IO(Result<&1, &1, U32 & String, File>):
+  import "./pipe.c"
+
+def stdin() -> IO(Result<&1, &1, U32 & String, File>):
+  Native.stdin()
+
 # Interrupt this executable's owned process scope, never a persisted arbitrary PID.
 def Native.cancel() -> IO(Unit):
   import "./posix.c"

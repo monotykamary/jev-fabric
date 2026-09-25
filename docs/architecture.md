@@ -48,7 +48,7 @@ Each concern splits into a pure policy module and an effect driver
 | JSONL sessions | `ServeCore` | `Serve` |
 
 Pure modules typecheck with no trust warnings and may not import drivers, foreign
-code or IO capabilities. Nine foreign C functions (`posix.c`, `host.c`, `pipe.c`,
+code or IO capabilities. Ten foreign C functions (`posix.c`, `host.c`, `pipe.c`,
 `http.c`) are the only effects beyond stock Bend Base. See
 [Safe Bend](safe-bend.md) for the exact guarantees.
 

@@ -1,6 +1,6 @@
 {
   "name": "jev-fabric",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Native process orchestration with typed, explicit Jev decisions, written in Bend.",
   "type": "module",

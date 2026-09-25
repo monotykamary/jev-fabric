@@ -24,3 +24,24 @@ static void __attribute__((constructor)) native_pipe_use(void) {
 }
 
 #endif
+
+// Native.stdin
+//
+// A CLOEXEC duplicate of fd 0 as a Base File handle. Reopening /dev/stdin fails
+// on Linux when fd 0 is a socket (Node, Bun and libuv give children socketpairs),
+// so readers duplicate the descriptor instead. File.close closes the duplicate
+// only; fd 0 stays open.
+
+#ifdef CID_NATIVE_STDIN
+
+Term native_stdin_run(Env e, Term* f, IoWork* w) {
+  int fd = fcntl(0, F_DUPFD_CLOEXEC, 3);
+  if (fd < 0) return io_fail(e, errno, NULL);
+  return io_done(e, io_hand(fd));
+}
+
+static void __attribute__((constructor)) native_stdin_use(void) {
+  io_eff(CID_NATIVE_STDIN, native_stdin_run, 0);
+}
+
+#endif

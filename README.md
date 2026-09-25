@@ -190,7 +190,7 @@ See the [native API](docs/native-api.md) and the skill's
 - **Checked policy core.** Project Bend code has no unsafe definitions; thirteen
   pure policy modules and three proof roots check without trust warnings, and 27
   laws cover selected runtime policy. Effects cross an explicit, allowlisted
-  foreign boundary of nine C functions. This is
+  foreign boundary of ten C functions. This is
   [scoped proof coverage](docs/safe-bend.md), not whole-program verification.
 
 ## Develop

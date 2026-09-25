@@ -16,7 +16,7 @@ command starts with `jev-fabric --`.
 ## Check the install
 
 ```bash
-jev-fabric -- --version        # 0.3.0-native (Bend 2.0.27)
+jev-fabric -- --version        # 0.3.1-native (Bend 2.0.27)
 ```
 
 If it is missing, install the release binary (macOS universal, Linux x64/arm64):
@@ -119,7 +119,7 @@ jev-fabric -- serve --timeout-ms 600000 20 50000   # 10 min, ≤20 Jev calls, �
 Write one JSON request per line; read one response per line, in order:
 
 ```text
-← {"ready":{"protocol":1,"version":"0.3.0-native",...}}
+← {"ready":{"protocol":1,"version":"0.3.1-native",...}}
 → {"id":1,"op":"start","argv":["/bin/sh","-c","npm run dev"]}
 ← {"id":1,"ok":true,"result":{"id":"<job>"}}
 → {"id":2,"op":"watch","job":"<job>","literal":"ready","timeoutMs":30000}

@@ -160,6 +160,8 @@ alive across three stateful JSONL requests, with no JS runtime.
 
 The only additional primitive is a CLOEXEC pipe returned as stock Base File
 handles (`native/pipe.c`); the existing process supervisor consumes its reader.
+`Process.stdin()` likewise returns a CLOEXEC duplicate of fd 0 as a File, which
+reads a pipe, socket, terminal or file alike; closing it leaves fd 0 open.
 Launch validation, quota and spawn failure paths close transferred descriptors.
 
 ## Monitor.bend: explicit bounded observations
