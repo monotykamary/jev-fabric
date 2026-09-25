@@ -10,3 +10,5 @@ build/
 !.env.example
 *.tsbuildinfo
 .DS_Store
+_vizdoom.ini
+.venv-doom/
