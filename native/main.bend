@@ -9,6 +9,7 @@ import ./Wire.bend as Wire
 import ./Jev.bend as Jev
 import ./Cli.bend as Cli
 import ./Time.bend as Time
+import ./Serve.bend as Serve
 
 def finish(code: U32, ok: Bool) -> IO(Unit):
   match ok:
@@ -74,6 +75,7 @@ def usage_text() -> String:
     ++ "  status <id> | events <id> [after-sequence]\n"
     ++ "  watch [--timeout-ms N] <id> <literal>\n"
     ++ "  wait [--timeout-ms N] <id> | stop <id>\n"
+    ++ "  serve [--timeout-ms N] [max-evaluations [max-tokens]] (JSONL session on stdin/stdout)\n"
     ++ "  update (reinstall the latest release via curl | sh)\n"
     ++ "Defaults: work 1h, Jev 30s, wait 30s, watch 5s. Timers are ceilings, not delays.\n"
     ++ "Configure JEV_FABRIC_TIMEOUT_MS, JEV_FABRIC_JEV_TIMEOUT_MS,"
@@ -127,7 +129,7 @@ def dispatch(args: List<String>) -> IO(Unit):
     case Con{"--help", Nil{}}:
       usage()
     case Con{"--version", Nil{}}:
-      IO.print("0.2.0-native (Bend 2.0.27)")
+      IO.print(Cli.version() ++ " (Bend 2.0.27)")
     case Con{"update", Nil{}}:
       update()
     case Con{"exec", Con{timeout, Con{"--stdin", Con{command, rest}}}}:
@@ -138,6 +140,8 @@ def dispatch(args: List<String>) -> IO(Unit):
       Runner.run(U32.read(timeout), source, rest)
     case Con{"watch", rest}:
       Monitor.command(Con{"watch", rest})
+    case Con{"serve", Con{timeout, rest}}:
+      Serve.serve(U32.read(timeout), rest)
     case Con{"validate", Con{path, Nil{}}}:
       validate_file(path)
     case Con{"jev", Con{timeout, Con{path, Nil{}}}}:

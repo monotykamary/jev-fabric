@@ -7,8 +7,8 @@ Bend, probes, tests or native examples: neither `@unsafe` nor `def f?` is used.
 Every such module is checked by stock Bend 2.0.27. No proof holes or unimplemented
 laws are permitted. No C, runtime or compiler changes were used to achieve this.
 
-`native/trust.json` declares twelve pure production modules, three proof roots and
-thirteen effect-driver modules. Each pure module and each proof root must report
+`native/trust.json` declares thirteen pure production modules, three proof roots and
+fourteen effect-driver modules. Each pure module and each proof root must report
 exactly **`All terms check.`**. Their transitive project dependencies cannot
 include drivers, foreign imports, or explicit Base IO/handle capabilities.
 
@@ -22,6 +22,10 @@ behavior, of the code generator, or of runtime memory safety.
   supply pure budgets, bounded validation, exact wire arithmetic and framing.
 - `MonitorCore` turns raw event snapshots into bounded observations and typed
   `Poll`/`Stop` decisions. `Monitor` interprets them with reads, writes and sleep.
+- `ServeCore` frames request lines, parses strict requests into typed operations,
+  computes deadline shares and CLI child argv, and encodes responses. `Serve`
+  reads stdin, prints responses, threads the Jev client and runs the planned
+  children; its loop consumes Nat fuel per read.
 - `HttpCore` validates inputs and constructs a typed request plan. `Http`
   interprets only successful plans. Curl argv construction has **no inputs**;
   credentials and bodies are supplied through private stdin, never argv. The

@@ -1,24 +1,17 @@
 {
   "name": "jev-fabric",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Native process orchestration with typed, explicit Jev decisions, written in Bend.",
   "type": "module",
   "license": "MIT",
   "bin": {
-    "jev-fabric": "build/jev-fabric",
-    "jev-fabric-reference": "dist/src/cli.js"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./dist/src/index.js"
-    }
+    "jev-fabric": "build/jev-fabric"
   },
   "files": [
     "LICENSE",
     "README.md",
-    "dist/src",
+    "clients",
     "docs",
     "examples",
     "install.sh",
@@ -29,15 +22,12 @@
   ],
   "scripts": {
     "build": "sh scripts/build-native.sh",
-    "build:reference": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:native": "sh scripts/build-native.sh",
     "test:native": "sh scripts/test-native.sh",
     "check:native-safety": "bun scripts/check-native-safety.ts",
-    "test:reference": "bun run build:reference && node --test dist/tests/*.test.js",
-    "test": "bun run test:native && bun run test:reference",
-    "demo": "sh scripts/build-native.sh && build/jev-fabric -- run examples/native/pipeline.bend",
-    "demo:reference": "node dist/src/cli.js run examples/pipeline.ts"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "bun run typecheck && bun run test:native",
+    "demo": "sh scripts/build-native.sh && build/jev-fabric -- run examples/native/pipeline.bend"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

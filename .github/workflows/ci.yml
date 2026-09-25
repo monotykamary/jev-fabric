@@ -1,19 +1,6 @@
 name: ci
 on: [push, pull_request]
 jobs:
-  reference:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run test:reference
   native:
     # The pinned macOS release archive has an invalid signature; see docs/bend-migration.md.
     runs-on: ubuntu-latest
@@ -22,7 +9,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run typecheck
       - run: sh scripts/setup-bend-ci.sh
+      # Includes the serve conformance suite and both clients (python3 is preinstalled).
       - run: bun run test:native
       - run: bend native/main.bend -o jev-fabric.c
       - uses: actions/upload-artifact@v4
@@ -51,6 +41,7 @@ jobs:
           build/jev-fabric -- validate examples/native/request.json >/dev/null
           id=$(build/jev-fabric -- start /bin/sh -c 'echo ready' | sed 's/.*"id":"\([0-9a-f]*\)".*/\1/')
           build/jev-fabric -- wait "$id" | grep -q '"state":"exited"'
+          printf '{"id":1,"op":"exec","argv":["/bin/echo","ok"]}\n' | build/jev-fabric -- serve | grep -q '"id":1,"ok":true'
   install-script:
     runs-on: ubuntu-latest
     steps:

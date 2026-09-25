@@ -74,6 +74,7 @@ jobs:
           build/jev-fabric -- validate examples/native/request.json >/dev/null
           id=$(build/jev-fabric -- start /bin/sh -c 'echo ready' | sed 's/.*"id":"\([0-9a-f]*\)".*/\1/')
           build/jev-fabric -- wait "$id" | grep -q '"state":"exited"'
+          printf '{"id":1,"op":"exec","argv":["/bin/echo","ok"]}\n' | build/jev-fabric -- serve | grep -q '"id":1,"ok":true'
       - run: sh scripts/package-release.sh ${{ matrix.platform }} build/jev-fabric
       - uses: actions/upload-artifact@v4
         with:

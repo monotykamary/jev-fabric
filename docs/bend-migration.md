@@ -11,10 +11,14 @@ in `native/`. See the [acceptance ledger](native-rewrite-ledger.md) and
 
 This is **not a drop-in TypeScript SDK rewrite**. Native programs use Bend IO,
 source imports and explicit argv rather than `defineProgram`/Promise contexts.
-Successful commands return `exited`, not inferred semantic completion. The
-reference remains under `src/` with separate build/test commands, not hidden
-behind the native executable. Interactive affine sessions and bounded line monitoring are also implemented;
+Successful commands return `exited`, not inferred semantic completion.
+Interactive affine sessions and bounded line monitoring are also implemented;
 exact limits and integrated evidence are tracked in the acceptance ledger.
+
+The TypeScript reference that preceded the native runtime has been removed.
+Callers in other languages use [`serve`](serve-protocol.md), a JSONL session over
+the native executable, through the thin Python and TypeScript clients in
+`clients/`. They frame JSON only; every policy stays in Bend.
 
 ## Minimal practical bridge
 
@@ -43,7 +47,8 @@ access cannot be dropped merely to minimize line count.
 
 ## Differences and trust boundaries
 
-- Native CLI syntax, receipts, modules and budget APIs differ from the reference.
+- Native CLI syntax, receipts, modules and budget APIs differ from the removed
+  TypeScript reference.
 - Wire numeric checks use exact decimals; native usage counts are 48-bit Nat,
   not every JavaScript-safe integer. Limits are explicit in the native API.
 - Logs/replay are bounded and may coalesce/evict observations; not lossless RPC.
@@ -61,7 +66,8 @@ access cannot be dropped merely to minimize line count.
 
 Local verification uses a working Bend 2.0.27 installation, macOS arm64, Apple
 Clang 21 and Bun as a development driver. Linux native CI is configured but has
-not been executed remotely in this session. Node 24+ is only for the reference.
+not been executed remotely in this session. Bun drives the tests; Python 3 runs
+the Python client's tests.
 
 The official 2.0.27 macOS arm64 archive matches its published checksum but fails
 `codesign --verify --strict` and is killed by macOS. We do not re-sign it or bypass
@@ -101,6 +107,6 @@ Wire's exact decimal validator is used for every Jev response.
 - `2fa11e1`: Bun workflow and project-local npm artifact/cache removal.
 - `bf74935`: native process spike.
 
-System-wide npm/shared cache and sibling projects remain untouched. Removal of
-the reference and broader distribution/platform claims should be separate,
-deliberate decisions after native deployment evidence.
+System-wide npm/shared cache and sibling projects remain untouched. The
+reference was removed after native releases shipped; `serve` and its clients
+replaced it as the non-Bend programmatic interface.

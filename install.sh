@@ -11,7 +11,7 @@
 #
 # Layout:
 #   $PREFIX/bin/jev-fabric                      -> ../share/jev-fabric/current/bin/jev-fabric
-#   $PREFIX/share/jev-fabric/<version>/         binary, Bend library, examples, skill
+#   $PREFIX/share/jev-fabric/<version>/         binary, Bend library, serve clients, examples, skill
 #   $PREFIX/share/jev-fabric/current            -> <version>
 set -eu
 
@@ -82,6 +82,7 @@ ln -sf "$share/current/bin/jev-fabric" "$prefix/bin/jev-fabric"
 
 say "Installed jev-fabric $installed to $prefix/bin/jev-fabric"
 say "Bend library: $share/current/native"
+say "Python/TypeScript clients: $share/current/clients"
 case ":$PATH:" in
   *":$prefix/bin:"*) ;;
   *) say "Add $prefix/bin to your PATH, e.g.: export PATH=\"$prefix/bin:\$PATH\"" ;;

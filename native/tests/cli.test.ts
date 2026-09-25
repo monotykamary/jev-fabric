@@ -39,14 +39,14 @@ def main() -> IO(Unit):
     IO.print(U32.show(spin(U32.from_nat(List.length(&1, String, args)))))
 `;
 
-test('public native help registers execution, source, validation, Jev and job verbs', async () => {
+test('public native help registers execution, source, validation, Jev, job and session verbs', async () => {
   const r = await run(['--help']);
   expect(r.code).toBe(0);
-  const verbs = ['exec', 'run', 'validate', 'jev', 'start', 'status', 'events', 'wait', 'stop', 'watch', 'update'];
+  const verbs = ['exec', 'run', 'validate', 'jev', 'start', 'status', 'events', 'wait', 'stop', 'watch', 'serve', 'update'];
   for (const cmd of verbs) expect(r.out).toContain(cmd);
-  expect((await run(['--version'])).out).toContain('0.2.0-native');
+  expect((await run(['--version'])).out).toContain('0.3.0-native');
   expect(manifest.bin['jev-fabric']).toBe('build/jev-fabric');
-  expect(manifest.bin['jev-fabric-reference']).toBe('dist/src/cli.js');
+  expect(Object.keys(manifest.bin)).toEqual(['jev-fabric']);
   expect(manifest.scripts.demo).toContain('examples/native/pipeline.bend');
 });
 

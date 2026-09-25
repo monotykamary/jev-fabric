@@ -20,6 +20,7 @@ All commands follow `build/jev-fabric --`:
 | `events <id> [after-sequence]` | Snapshot of bounded retained JSONL events |
 | `wait [--timeout-ms N] <id>` | Poll until final receipt or client deadline; timeout returns running state |
 | `stop <id>` | Idempotent cooperative stop through a private marker, never arbitrary PID signalling |
+| `serve [--timeout-ms N] [max-evaluations [max-tokens]]` | JSONL session on stdin/stdout: one request per line, one Jev client and deadline for the session. See [the serve protocol](serve-protocol.md) |
 | `update` | Print and run `curl -fsSL …/install.sh \| sh`, like `bend update`; exits with the installer's status. `JEV_FABRIC_PREFIX`/`JEV_FABRIC_VERSION` pass through |
 | `watch [--timeout-ms N] <id> <literal>` | Live bounded line batches, loss records and a final observation summary; duration 1..300000 ms |
 
@@ -27,7 +28,7 @@ Timers may be omitted. Defaults and configuration:
 
 | Operations | Default maximum | Environment override |
 | --- | --- | --- |
-| `exec`, `run`, `start`, timer-free Process/Session APIs, `Scope.open` | 1 hour | `JEV_FABRIC_TIMEOUT_MS` |
+| `exec`, `run`, `start`, `serve` sessions, timer-free Process/Session APIs, `Scope.open` | 1 hour | `JEV_FABRIC_TIMEOUT_MS` |
 | `jev`, `Jev.connect` | 30 seconds | `JEV_FABRIC_JEV_TIMEOUT_MS` |
 | CLI `wait` | 30 seconds | `JEV_FABRIC_WAIT_MS` |
 | CLI `watch` | 5 seconds | `JEV_FABRIC_WATCH_MS` |
@@ -53,8 +54,8 @@ Legacy forms remain supported: `exec/run/start/jev <ms> ...`,
 Do not specify both a timeout flag and a positional timeout.
 
 Timeouts are 1..3600000 ms. Source compilation consumes the same `run` deadline
-as execution. `run` returns a **process receipt**, not the reference program
-context/envelope: stdout may contain your program's JSON result. It does not
+as execution. `run` returns a **process receipt**: stdout may contain your
+program's JSON result. It does not
 interpret that output as a verified task outcome. Compile once yourself and use
 `exec` or `start` to avoid repeated compilation.
 
@@ -181,7 +182,7 @@ Stock Bend IO parking flushes live records; no monitor-specific C is required.
 ## Pure policy and trust
 
 `TimeCore` and `Cli` hold timer/configuration/argument policy.
-`MonitorCore`, `HttpCore`, `CredentialCore` and `JevCore` hold the other pure policies;
+`MonitorCore`, `HttpCore`, `CredentialCore`, `JevCore` and `ServeCore` hold the other pure policies;
 the original module names remain effectful entrypoints. `Jev.Client` and
 `Jev.Returned` remain public affine type aliases; their constructors live in
 `JevCore`. `Http.post`, `Credentials.resolve` and `Monitor.command` retain their
@@ -211,7 +212,7 @@ arithmetic**, not F32: probability bounds and mass tolerance [0.98,1.02] include
 long fractions and tiny exponents without rounding invalid values into range.
 Numeric lexemes are capped at 1024 characters, exponent magnitude 4096, and
 usage counts at the native 48-bit Nat maximum (281474976710655). These limits
-intentionally differ from the JS reference. Generic bounded JSON can preserve
+intentionally differ from JavaScript numbers. Generic bounded JSON can preserve
 larger numeric lexemes; wire numeric operations impose the tighter bounds.
 
 Vendoring, patches, license and hashes: `native/vendor/PROVENANCE.md`.

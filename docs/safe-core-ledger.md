@@ -8,7 +8,7 @@
 - [x] Negative tests show the gate rejects unsafe, holes and effect contamination.
 - [x] Fresh native aggregate: 85 tests / 796 expectations pass, including the 10 new safety cases. The later qualified-IO-alias regression adds one more focused expectation (10 cases / 18 expectations pass).
 - [x] Final gate after the qualified-IO check passes: all 42 Bend modules typecheck; ten pure modules and both proof roots have clean trust verdicts; exactly eight foreign declarations are allowlisted. Completed in 79 seconds with per-module progress.
-- [x] Reference aggregate resolved: 31/31 pass after fixing pre-reap worker-group signalling. The original 25/26 result and diagnostics remain part of checkpoint `f0f0685`. See [reference-cleanup-ledger.md](reference-cleanup-ledger.md) for the macOS zombie-group reproduction, deterministic red/green tests, and preserved real-EPERM behavior.
+- [x] Reference aggregate resolved: 31/31 pass after fixing pre-reap worker-group signalling. The original 25/26 result and diagnostics remain part of checkpoint `f0f0685`. The macOS zombie-group reproduction and its red/green tests were recorded in `docs/reference-cleanup-ledger.md`, removed with the TypeScript reference (see git history).
 
 Evidence: `.tmp/safe-final.log` (fresh native suite and reference failure),
 `.tmp/safe-targeted.log` (23 monitor/codec cases), and `.tmp/safety-gate.log`

@@ -1,6 +1,6 @@
 ---
 name: jev-fabric
-description: Run, supervise and observe native processes with bounded receipts, durable background jobs and live filtered watches, and make explicit typed Jev decisions (choice, noul, score) from structured state. Use when a task needs a long-running or detached command that outlives the shell tool call, bounded log observation instead of tailing everything, or a fast typed judgment over an observation rather than generated text.
+description: Run, supervise and observe native processes with bounded receipts, durable background jobs and live filtered watches, and make explicit typed Jev decisions (choice, noul, score) from structured state. Use when a task needs a long-running or detached command that outlives the shell tool call, bounded log observation instead of tailing everything, or a fast typed judgment over an observation rather than generated text. Also use it when Python, TypeScript or other code should drive processes and Jev calls through one budgeted JSONL session (`serve`).
 ---
 
 # jev-fabric
@@ -16,7 +16,7 @@ command starts with `jev-fabric --`.
 ## Check the install
 
 ```bash
-jev-fabric -- --version        # 0.2.0-native (Bend 2.0.27)
+jev-fabric -- --version        # 0.3.0-native (Bend 2.0.27)
 ```
 
 If it is missing, install the release binary (macOS universal, Linux x64/arm64):
@@ -106,17 +106,49 @@ Rules:
 See [references/jev-requests.md](references/jev-requests.md) for the request
 schema, limits and patterns (including choosing among more than 255 options).
 
+## Sessions from Python, TypeScript or any language
+
+When code (not you, turn by turn) makes many calls, one `serve` session beats
+repeated CLI invocations: one Jev client, so the call/token budget spans the
+session, the credential resolves once and the TLS connection stays warm.
+
+```bash
+jev-fabric -- serve --timeout-ms 600000 20 50000   # 10 min, ≤20 Jev calls, ≤50000 tokens
+```
+
+Write one JSON request per line; read one response per line, in order:
+
+```text
+← {"ready":{"protocol":1,"version":"0.3.0-native",...}}
+→ {"id":1,"op":"start","argv":["/bin/sh","-c","npm run dev"]}
+← {"id":1,"ok":true,"result":{"id":"<job>"}}
+→ {"id":2,"op":"watch","job":"<job>","literal":"ready","timeoutMs":30000}
+← {"id":2,"ok":true,"result":[{"type":"monitor.batch",...},{"type":"monitor.end",...}]}
+→ {"id":3,"op":"jev","request":{"state":...,"questions":{...}}}
+← {"id":3,"ok":false,"error":{"code":1,"message":"Jev budget exhausted"}}
+```
+
+Ops: `exec` (`argv`, `stdin?`), `start` (`argv`), `status`/`stop` (`job`),
+`events` (`job`, `after?`), `wait` (`job`), `watch` (`job`, `literal`),
+`validate`/`jev` (`request`); most take `timeoutMs?`. Unknown fields are
+rejected. Close stdin to end the session. Ready-made single-file clients live in
+`~/.local/share/jev-fabric/current/clients/` (`python/jev_fabric.py`,
+`typescript/jev-fabric.ts`). The protocol reference is `docs/serve-protocol.md`
+in the repository.
+
 ## Composed programs in Bend
 
-For loops that combine processes, sessions and many Jev calls (a game bot, a
-crawler, a supervisor), write a Bend program against the library and run it:
+For loops that need persistent interactive child sessions, concurrent effects or
+shared deadline scopes (a game bot, a crawler, a supervisor), write a Bend
+program against the library and run it:
 
 ```bash
 jev-fabric -- run program.bend arg1 arg2     # compiles (needs `bend` 2.0.27), then runs
 ```
 
-HTTPS keeps one pooled TLS connection per process, so a Bend program making many
-calls is much faster than repeated `jev` CLI invocations. See
+HTTPS keeps one pooled TLS connection per process, so a Bend program or a
+`serve` session making many calls is much faster than repeated `jev` CLI
+invocations. See
 [references/bend-api.md](references/bend-api.md).
 
 ## Boundaries

@@ -72,8 +72,8 @@ curl/TLS and TypeSafe model `jev-1.13.0`:
 
 No automatic retry, screenshots, app/browser control, publishing, or unrelated
 repository edits. This validates wire/composition, not model accuracy generally.
-The two earlier live reference requests remain historical evidence in
-`verification.md`.
+The two earlier live reference requests were recorded in `docs/verification.md`,
+removed with the TypeScript reference (see git history).
 
 ## Explicit differences
 

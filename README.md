@@ -120,11 +120,42 @@ jev-fabric -- jev examples/native/request.json 10000         # one billed call
   pooled TLS connection: verified certificates, no redirects, no proxies, 1 MiB
   bound. `JEV_FABRIC_HTTP=exec` forces a fresh `curl` process per request.
 
+## Sessions from Python or TypeScript
+
+`jev-fabric -- serve` keeps one process open and speaks JSONL on stdin/stdout:
+one request per line, one response per line. The session holds one Jev client, so
+its call and token budget covers the whole session, its credential resolves once,
+and its TLS connection stays warm. Each process or job request runs the CLI as a
+child, so a failing command costs one error response, never the session.
+
+```python
+from jev_fabric import Fabric                     # clients/python, stdlib only
+
+with Fabric(max_evaluations=20) as fabric:        # explicit session budget
+    job = fabric.start(["/bin/sh", "-c", "npm run dev"])
+    fabric.watch(job, "ready", timeout_ms=30000)
+    answer = fabric.jev(request)                  # typed, validated, warm connection
+```
+
+```ts
+import { Fabric } from './jev-fabric.ts';         // clients/typescript, node: built-ins only
+
+const fabric = await Fabric.open({ maxEvaluations: 20 });
+const receipt = await fabric.exec(['make', 'test'], { timeoutMs: 600000 });
+await fabric.close();
+```
+
+Both clients are single files with no dependencies, installed at
+`~/.local/share/jev-fabric/current/clients/`. They only frame JSON; budgets,
+deadlines, credentials and validation stay in the binary. Any other language can
+speak the [protocol](docs/serve-protocol.md) directly. See
+[`examples/clients/`](examples/clients/) for runnable versions.
+
 ## Loops in Bend
 
-When a task is a loop (a bot, a crawler, a supervisor), write a small Bend
-program: one affine Jev client, one warm connection, persistent child sessions
-and shared deadlines.
+When a loop needs more than one request at a time (persistent child sessions,
+concurrent effects, shared deadline scopes), write a small Bend program: one
+affine Jev client, one warm connection, and the checked library.
 
 | Demo | What it does | Measured |
 | --- | --- | --- |
@@ -156,7 +187,7 @@ See the [native API](docs/native-api.md) and the skill's
 - **`exited` is not success.** A zero exit is an observation; verify the work.
 - **Bounded observations, not a lossless protocol.** No reboot resume,
   exactly-once execution or rollback.
-- **Checked policy core.** Project Bend code has no unsafe definitions; twelve
+- **Checked policy core.** Project Bend code has no unsafe definitions; thirteen
   pure policy modules and three proof roots check without trust warnings, and 27
   laws cover selected runtime policy. Effects cross an explicit, allowlisted
   foreign boundary of nine C functions. This is
@@ -167,13 +198,12 @@ See the [native API](docs/native-api.md) and the skill's
 ```sh
 bun install --frozen-lockfile --ignore-scripts
 bun run check:native-safety      # also enforced by native builds
-bun run test:native              # JEV_TEST_JOBS caps parallel fixture builds
-bun run test:reference           # the TypeScript reference; Node 24+
+bun run test:native              # includes serve conformance and both clients (needs python3)
+bun run typecheck                # the TypeScript client and example
 bun run demo                     # native, no model call
 ```
 
-The preserved TypeScript implementation is a [reference](docs/typescript-reference.md),
-not a runtime dependency. More: [architecture](docs/architecture.md),
+More: [architecture](docs/architecture.md), [serve protocol](docs/serve-protocol.md),
 [Bend migration](docs/bend-migration.md), [acceptance ledger](docs/native-rewrite-ledger.md).
 
 ## License

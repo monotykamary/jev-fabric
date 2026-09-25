@@ -4,7 +4,8 @@
 #   sh scripts/package-release.sh <platform> <path-to-binary>
 #
 # The archive holds one top-level jev-fabric/ directory: the executable, the Bend
-# library (for `jev-fabric -- run` programs), examples, the agent skill and docs.
+# library (for `jev-fabric -- run` programs), the Python and TypeScript `serve`
+# clients, examples, the agent skill and docs.
 set -eu
 
 [ $# -eq 2 ] || { echo 'usage: package-release.sh <platform> <binary>' >&2; exit 2; }
@@ -28,7 +29,12 @@ chmod 755 "$root/bin/jev-fabric"
 # Library modules and their C effects; tests and probes stay in the repository.
 cp native/*.bend native/*.c native/trust.json "$root/native/"
 cp -R native/vendor "$root/native/vendor"
-cp -R examples/native examples/doom "$root/examples/"
+cp -R examples/native examples/doom examples/clients "$root/examples/"
+# Clients ship without their tests.
+mkdir -p "$root/clients/python" "$root/clients/typescript"
+cp clients/python/jev_fabric.py "$root/clients/python/"
+cp clients/typescript/jev-fabric.ts "$root/clients/typescript/"
+cp clients/README.md "$root/clients/"
 cp -R skills "$root/skills"
 cp README.md LICENSE "$root/"
 printf 'v%s\n' "$version" > "$root/VERSION"

@@ -6,6 +6,9 @@ import ./TimeCore.bend as Time
 def Error() -> Type:
   U32 & String
 
+def version() -> String:
+  "0.3.0-native"
+
 type Options is Type:
   Options{args: List<String>, timeout: Maybe<&2, U32>, input: Bool, literal: Bool}
 
@@ -171,6 +174,8 @@ def select_command(
       wait_args(args, timeout)
     case "watch":
       watch_args(args, timeout)
+    case "serve":
+      Done{Timed{"serve", args, timeout, False{}}}
     case other:
       launch(other, args, timeout, input, literal)
 
@@ -205,6 +210,8 @@ def accepts_timeout(command: String) -> Bool:
     case "wait":
       True{}
     case "watch":
+      True{}
+    case "serve":
       True{}
     case other:
       False{}
