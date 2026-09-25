@@ -6,33 +6,31 @@ def RawBytes() -> Type:
 
 
 # Curl config is not JSON. Only these escapes have curl-config semantics.
-def escape_char(c: Char, quote: Bool, back: Bool, nl: Bool, cr: Bool, tab: Bool, vt: Bool) -> String:
-  match quote back nl cr tab vt:
-    case True{} _ _ _ _ _:
+def escaped(c: Char) -> String:
+  match c:
+    case '"':
       "\\\""
-    case False{} True{} _ _ _ _:
+    case '\\':
       "\\\\"
-    case False{} False{} True{} _ _ _:
+    case '\n':
       "\\n"
-    case False{} False{} False{} True{} _ _:
+    case '\r':
       "\\r"
-    case False{} False{} False{} False{} True{} _:
+    case '\t':
       "\\t"
-    case False{} False{} False{} False{} False{} True{}:
+    case '\u{b}':
       "\\v"
-    case False{} False{} False{} False{} False{} False{}:
-      SCon{c, SNil{}}
+    case other:
+      SCon{other, SNil{}}
 
-def escaped(+c: Char) -> String:
-  +n = Char.to_u32(c)
-  escape_char(c, U32.is_eq(n, 34), U32.is_eq(n, 92), U32.is_eq(n, 10), U32.is_eq(n, 13), U32.is_eq(n, 9), U32.is_eq(n, 11))
-
+# Accumulates escaped characters in reverse, then reverses once at the end.
 def config_body(s: String, acc: List<&2, Char>) -> String:
   match s:
     case SNil{}:
       String.from_list(List.reverse(&2, Char, acc))
-    case SCon{h, t}:
-      config_body(t, List.append(&2, Char, List.reverse(&2, Char, String.to_list(escaped(h))), acc))
+    case SCon{head, tail}:
+      escaped_reversed = List.reverse(&2, Char, String.to_list(escaped(head)))
+      config_body(tail, List.append(&2, Char, escaped_reversed, acc))
 
 def quote(s: String) -> String:
   "\"" ++ config_body(s, []) ++ "\""
@@ -65,21 +63,35 @@ def config(url: String, key: String, body: String, +ms: U32) -> String:
 def digit(+n: U32) -> Bool:
   U32.is_ge(n, 48) && U32.is_le(n, 57)
 
-def http_status(code: U32, bytes: List<&2, U32>, ok: Bool) -> Result<&1, &1, U32 & String, List<&2, U32>>:
+def http_status(
+  code: U32,
+  bytes: List<&2, U32>,
+  ok: Bool,
+) -> Result<&1, &1, U32 & String, List<&2, U32>>:
   match ok:
     case True{}:
       Done{List.reverse(&2, U32, bytes)}
     case False{}:
       Fail{(1, "Jev HTTP " ++ U32.show(code) ++ "; no automatic retry")}
 
-def status_digits(a: U32, b: U32, c: U32, bytes: List<&2, U32>, valid: Bool) -> Result<&1, &1, U32 & String, List<&2, U32>>:
+def status_digits(
+  a: U32,
+  b: U32,
+  c: U32,
+  bytes: List<&2, U32>,
+  valid: Bool,
+) -> Result<&1, &1, U32 & String, List<&2, U32>>:
   match valid:
     case False{}:
       Fail{(1, "Invalid HTTP transport status")}
     case True{}:
-      +code = U32.add(U32.add(U32.mul(U32.sub(a, 48), 100), U32.mul(U32.sub(b, 48), 10)), U32.sub(c, 48))
+      hundreds = U32.mul(U32.sub(a, 48), 100)
+      tens = U32.mul(U32.sub(b, 48), 10)
+      +code = U32.add(U32.add(hundreds, tens), U32.sub(c, 48))
       http_status(code, bytes, U32.is_ge(code, 200) && U32.is_lt(code, 300))
 
+# curl's --write-out appends "\n%{http_code}", so the reversed capture starts with
+# the status digits (last digit first) followed by that newline.
 def status(bytes: List<&2, U32>) -> Result<&1, &1, U32 & String, List<&2, U32>>:
   match bytes:
     case Con{+c, Con{+b, Con{+a, Con{nl, rest}}}}:
@@ -94,7 +106,9 @@ def capture_ok(bytes: List<&2, U32>, ok: Bool) -> Result<&1, &1, U32 & String, L
     case True{}:
       status(List.reverse(&2, U32, bytes))
 
-def captured(result: Result<&1, &1, U32 & String, RawBytes>) -> Result<&1, &1, U32 & String, List<&2, U32>>:
+def captured(
+  result: Result<&1, &1, U32 & String, RawBytes>,
+) -> Result<&1, &1, U32 & String, List<&2, U32>>:
   match result:
     case Fail{error}:
       Fail{(1, "Jev transport could not start")}
@@ -111,15 +125,37 @@ def argv() -> List<String>:
    "--proxy", "", "--noproxy", "*", "--connect-timeout", "10", "--max-filesize", "1048576",
    "--write-out", "\n%{http_code}", "--config", "-"]
 
-def request_allowed(url: String, key: String, body: String, +timeout: U32, allowed: Bool) -> Result<&1, &1, U32 & String, Request>:
+def request_allowed(
+  url: String,
+  key: String,
+  body: String,
+  +timeout: U32,
+  allowed: Bool,
+) -> Result<&1, &1, U32 & String, Request>:
   match allowed:
     case False{}:
       Fail{(1, "Invalid HTTPS request configuration")}
     case True{}:
       Done{Request{config(url, key, body, timeout), timeout}}
 
-def request(+url: String, +key: String, +body: String, +timeout: U32) -> Result<&1, &1, U32 & String, Request>:
-  request_allowed(url, key, body, timeout,
-    String.starts_with(url, "https://") && visible(url) && Nat.is_le(String.length(url), 4096n) && key_valid(key) &&
-    String.starts_with(body, "{") && no_nul(body) && Nat.is_le(String.length(body), 1048576n) &&
-    U32.is_ge(timeout, 1) && U32.is_le(timeout, 3600000))
+def request(
+  +url: String,
+  +key: String,
+  +body: String,
+  +timeout: U32,
+) -> Result<&1, &1, U32 & String, Request>:
+  request_allowed(
+    url,
+    key,
+    body,
+    timeout,
+    String.starts_with(url, "https://")
+      && visible(url)
+      && Nat.is_le(String.length(url), 4096n)
+      && key_valid(key)
+      && String.starts_with(body, "{")
+      && no_nul(body)
+      && Nat.is_le(String.length(body), 1048576n)
+      && U32.is_ge(timeout, 1)
+      && U32.is_le(timeout, 3600000),
+  )

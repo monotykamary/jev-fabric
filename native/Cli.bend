@@ -34,14 +34,25 @@ def input_allowed(allowed: Bool, duplicate: Bool) -> Result<&1, &1, Error, Unit>
     case _ _:
       Fail{(2, "--stdin is supported once, for exec only")}
 
-def first_option(args: List<String>, timeout: Maybe<&2, U32>, input: Bool, bad: Bool) -> Result<&1, &1, Error, Options>:
+def first_option(
+  args: List<String>,
+  timeout: Maybe<&2, U32>,
+  input: Bool,
+  bad: Bool,
+) -> Result<&1, &1, Error, Options>:
   match bad:
     case True{}:
       Fail{(2, "unknown option; use -- before a literal command")}
     case False{}:
       Done{Options{args, timeout, input, False{}}}
 
-def options(args: List<String>, timeout: Maybe<&2, U32>, +input: Bool, +allow_input: Bool, +limit: U32) -> Result<&1, &1, Error, Options>:
+def options(
+  args: List<String>,
+  timeout: Maybe<&2, U32>,
+  +input: Bool,
+  +allow_input: Bool,
+  +limit: U32,
+) -> Result<&1, &1, Error, Options>:
   match args:
     case Con{"--timeout-ms", Con{raw, rest}}:
       do Result<&1, &1, Error, Options>:
@@ -77,32 +88,58 @@ def legacy_exec(args: List<String>, ms: U32, +input: Bool) -> Result<&1, &1, Err
     case other:
       Done{Timed{"exec", other, Some{ms}, input}}
 
-def legacy_plan(command: String, args: List<String>, ms: U32, input: Bool) -> Result<&1, &1, Error, Plan>:
+def legacy_plan(
+  command: String,
+  args: List<String>,
+  ms: U32,
+  input: Bool,
+) -> Result<&1, &1, Error, Plan>:
   match command:
     case "exec":
       legacy_exec(args, ms, input)
     case other:
       Done{Timed{other, args, Some{ms}, input}}
 
-def legacy(+command: String, args: List<String>, timeout: Maybe<&2, U32>, input: Bool, raw: String) -> Result<&1, &1, Error, Plan>:
+# Legacy positional syntax carries the timeout as a bare millisecond argument.
+def legacy(
+  +command: String,
+  args: List<String>,
+  timeout: Maybe<&2, U32>,
+  input: Bool,
+  raw: String,
+) -> Result<&1, &1, Error, Plan>:
   do Result<&1, &1, Error, Plan>:
     value : U32 <- Time.parse(raw, max(command))
     ms : U32 <- unique(timeout, value)
     legacy_plan(command, args, ms, input)
 
-def launch_first(+command: String, first: String, rest: List<String>, timeout: Maybe<&2, U32>, input: Bool, numeric: Bool) -> Result<&1, &1, Error, Plan>:
+def launch_first(
+  +command: String,
+  first: String,
+  rest: List<String>,
+  timeout: Maybe<&2, U32>,
+  input: Bool,
+  numeric: Bool,
+) -> Result<&1, &1, Error, Plan>:
   match numeric:
     case True{}:
       legacy(command, rest, timeout, input, first)
     case False{}:
       Done{Timed{command, Con{first, rest}, timeout, input}}
 
-def launch(command: String, args: List<String>, timeout: Maybe<&2, U32>, input: Bool, literal: Bool) -> Result<&1, &1, Error, Plan>:
+def launch(
+  command: String,
+  args: List<String>,
+  timeout: Maybe<&2, U32>,
+  input: Bool,
+  literal: Bool,
+) -> Result<&1, &1, Error, Plan>:
   match args:
     case Nil{}:
       Fail{(2, "command or file is required")}
     case Con{+first, rest}:
-      launch_first(command, first, rest, timeout, input, Bool.not(literal) && Bool.not(String.is_empty(first)) && digits(first))
+      numeric = Bool.not(literal) && Bool.not(String.is_empty(first)) && digits(first)
+      launch_first(command, first, rest, timeout, input, numeric)
 
 def wait_args(args: List<String>, timeout: Maybe<&2, U32>) -> Result<&1, &1, Error, Plan>:
   match args:
@@ -122,7 +159,13 @@ def watch_args(args: List<String>, timeout: Maybe<&2, U32>) -> Result<&1, &1, Er
     case other:
       Fail{(2, "usage: watch [--timeout-ms N] <id> <literal>")}
 
-def select_command(command: String, args: List<String>, timeout: Maybe<&2, U32>, input: Bool, literal: Bool) -> Result<&1, &1, Error, Plan>:
+def select_command(
+  command: String,
+  args: List<String>,
+  timeout: Maybe<&2, U32>,
+  input: Bool,
+  literal: Bool,
+) -> Result<&1, &1, Error, Plan>:
   match command:
     case "wait":
       wait_args(args, timeout)
@@ -148,12 +191,30 @@ def route(+command: String, args: List<String>, timed: Bool) -> Result<&1, &1, E
     case False{}:
       Done{Pass{Con{command, args}}}
 
+# Commands that accept timeout options; every other command passes through unchanged.
+def accepts_timeout(command: String) -> Bool:
+  match command:
+    case "exec":
+      True{}
+    case "run":
+      True{}
+    case "start":
+      True{}
+    case "jev":
+      True{}
+    case "wait":
+      True{}
+    case "watch":
+      True{}
+    case other:
+      False{}
+
 def parse(args: List<String>) -> Result<&1, &1, Error, Plan>:
   match args:
     case Nil{}:
       Done{Pass{Nil{}}}
     case Con{+command, rest}:
-      route(command, rest, String.eq(command, "exec") || String.eq(command, "run") || String.eq(command, "start") || String.eq(command, "jev") || String.eq(command, "wait") || String.eq(command, "watch"))
+      route(command, rest, accepts_timeout(command))
 
 def exec_args(args: List<String>, ms: U32, input: Bool) -> List<String>:
   match input:
