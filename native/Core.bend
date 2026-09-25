@@ -10,7 +10,13 @@ def bit(value: Bool) -> Nat:
 type Budget is Data:
   Budget{remaining: Nat, evaluations: Nat, tokens: Nat, limit: Nat}
 
-def reserve_if(remaining: Nat, used: Nat, tokens: Nat, limit: Nat, allowed: Bool) -> Maybe<&2, Budget>:
+def reserve_if(
+  remaining: Nat,
+  used: Nat,
+  tokens: Nat,
+  limit: Nat,
+  allowed: Bool,
+) -> Maybe<&2, Budget>:
   match allowed:
     case False{}:
       None{}
@@ -133,28 +139,40 @@ def covered(keys: List<&2, String>, +actual: List<&2, String>) -> Bool:
 
 def distribution(+keys: List<&2, String>, +rows: List<&2, Probability>) -> Bool:
   +actual = names(rows)
-  unique(keys) && unique(actual) &&
-  Nat.is_eq(List.length(&2, String, keys), List.length(&2, String, actual)) &&
-  covered(keys, actual) && all_probabilities(rows) &&
-  F32.is_le(F32.abs(F32.sub(mass(rows), 1.0)), 0.02)
+  unique(keys)
+    && unique(actual)
+    && Nat.is_eq(List.length(&2, String, keys), List.length(&2, String, actual))
+    && covered(keys, actual)
+    && all_probabilities(rows)
+    && F32.is_le(F32.abs(F32.sub(mass(rows), 1.0)), 0.02)
 
-def choice(+keys: List<&2, String>, selected: String, confidence: F32, rows: List<&2, Probability>) -> Bool:
-  Nat.is_ge(List.length(&2, String, keys), 1n) &&
-  Nat.is_le(List.length(&2, String, keys), 255n) &&
-  Nat.is_eq(count(keys, selected), 1n) && probability(confidence) && distribution(keys, rows)
+def choice(
+  +keys: List<&2, String>,
+  selected: String,
+  confidence: F32,
+  rows: List<&2, Probability>,
+) -> Bool:
+  Nat.is_ge(List.length(&2, String, keys), 1n)
+    && Nat.is_le(List.length(&2, String, keys), 255n)
+    && Nat.is_eq(count(keys, selected), 1n)
+    && probability(confidence)
+    && distribution(keys, rows)
 
 def indexes(n: Nat) -> List<&2, String>:
   match n:
     case 0n:
       Nil{}
     case 1n+predecessor:
-      +p = predecessor
-      Con{Nat.show(p), indexes(p)}
+      +index = predecessor
+      Con{Nat.show(index), indexes(index)}
 
 def score(+levels: Nat, +value: F32, confidence: F32, rows: List<&2, Probability>) -> Bool:
-  Nat.is_ge(levels, 2n) && Nat.is_le(levels, 10n) &&
-  F32.is_ge(value, 0.0) && F32.is_le(value, F32.from_nat(Nat.sub(levels, 1n))) &&
-  probability(confidence) && distribution(indexes(levels), rows)
+  Nat.is_ge(levels, 2n)
+    && Nat.is_le(levels, 10n)
+    && F32.is_ge(value, 0.0)
+    && F32.is_le(value, F32.from_nat(Nat.sub(levels, 1n)))
+    && probability(confidence)
+    && distribution(indexes(levels), rows)
 
 def keep(line: String, wanted: Bool) -> Maybe<&2, String>:
   match wanted:
@@ -165,13 +183,28 @@ def keep(line: String, wanted: Bool) -> Maybe<&2, String>:
 
 def monitor(line: String, literal: String, previous: String) -> Maybe<&2, String>:
   +text = String.trim(line)
-  keep(text, Bool.not(String.is_empty(text)) && String.contains(text, literal) && Bool.not(String.eq(text, previous)))
+  keep(
+    text,
+    Bool.not(String.is_empty(text))
+      && String.contains(text, literal)
+      && Bool.not(String.eq(text, previous)),
+  )
 
 type Batch is Data:
   Batch{lines: List<&2, String>, omitted: Nat, clipped: Nat}
 
+def batch_line_max() -> Nat:
+  100n
+
+# Lines are clipped to batch_line_max() chars; the oldest lines beyond capacity are dropped.
 def batch_push(batch: Batch, +line: String, +capacity: Nat) -> Batch:
   match batch:
     case Batch{lines, omitted, clipped}:
-      +next = {Con{String.take(line, 100n), lines} : List<&2, String>}
-      Batch{List.take(&2, String, next, capacity), Nat.add(omitted, bit(Nat.is_gt(List.length(&2, String, next), capacity))), Nat.add(clipped, bit(Nat.is_gt(String.length(line), 100n)))}
+      +next = {Con{String.take(line, batch_line_max()), lines} : List<&2, String>}
+      overflowed = Nat.is_gt(List.length(&2, String, next), capacity)
+      line_clipped = Nat.is_gt(String.length(line), batch_line_max())
+      Batch{
+        List.take(&2, String, next, capacity),
+        Nat.add(omitted, bit(overflowed)),
+        Nat.add(clipped, bit(line_clipped)),
+      }

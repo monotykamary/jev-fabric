@@ -11,8 +11,25 @@ def guard(ok: Bool, message: String) -> Result<&1, &1, U32 & String, Unit>:
     case False{}:
       Fail{(22, message)}
 
+# Limits shared by the textual scan and the AST validator.
+def bytes_max() -> U32:
+  1048576
+
+def depth_max() -> U32:
+  64
+
+def work_max() -> U32:
+  32768
+
+def one_if(flag: Bool) -> U32:
+  Bool.pick(U32, flag, 1, 0)
+
+# UTF-8 encoded width of a scalar: 1 byte, plus one per threshold it reaches.
 def width(+code: U32) -> U32:
-  (1 + Bool.pick(U32, U32.is_ge(code, 128), 1, 0) + Bool.pick(U32, U32.is_ge(code, 2048), 1, 0) + Bool.pick(U32, U32.is_ge(code, 65536), 1, 0) : U32)
+  second = one_if(U32.is_ge(code, 128))
+  third = one_if(U32.is_ge(code, 2048))
+  fourth = one_if(U32.is_ge(code, 65536))
+  (1 + second + third + fourth : U32)
 
 # Count bytes with a decreasing budget, rejecting invalid scalars before consumers.
 def string_cost(s: String, +budget: U32) -> Result<&1, &1, U32 & String, U32>:
@@ -21,8 +38,9 @@ def string_cost(s: String, +budget: U32) -> Result<&1, &1, U32 & String, U32>:
       Done{budget}
     case SCon{Chr{+code}, tail}:
       do Result<&1, &1, U32 & String, U32>:
-        guard(J.JSON.is_scalar(code) && U32.is_ge(budget, width(code)), "JSON string/byte limit")
-        string_cost(tail, U32.sub(budget, width(code)))
+        +bytes : U32 = width(code)
+        guard(J.JSON.is_scalar(code) && U32.is_ge(budget, bytes), "JSON string/byte limit")
+        string_cost(tail, U32.sub(budget, bytes))
 
 type Scan is Data:
   Scan{quoted: Bool, escaped: Bool, depth: U32, work: U32}
@@ -34,12 +52,20 @@ def scan_step(state: Scan, +c: Char) -> Scan:
     case Scan{True{}, False{}, depth, work}:
       Scan{Bool.not(J.JSON.is_quote(c)), J.JSON.is_slash(c), depth, work}
     case Scan{False{}, escaped, depth, work}:
-      Scan{J.JSON.is_quote(c), False{}, U32.sub(U32.add(depth, Bool.pick(U32, J.JSON.is_lbrk(c) || J.JSON.is_lbra(c), 1, 0)), Bool.pick(U32, J.JSON.is_rbrk(c) || J.JSON.is_rbra(c), 1, 0)), U32.add(work, Bool.pick(U32, J.JSON.is_ws(c), 0, 1))}
+      opened = one_if(J.JSON.is_lbrk(c) || J.JSON.is_lbra(c))
+      closed = one_if(J.JSON.is_rbrk(c) || J.JSON.is_rbra(c))
+      counted = one_if(Bool.not(J.JSON.is_ws(c)))
+      Scan{
+        J.JSON.is_quote(c),
+        False{},
+        U32.sub(U32.add(depth, opened), closed),
+        U32.add(work, counted),
+      }
 
 def scan_ok(state: Scan) -> Bool:
   match state:
     case Scan{quoted, escaped, depth, work}:
-      U32.is_le(depth, 64) && U32.is_le(work, 32768)
+      U32.is_le(depth, depth_max()) && U32.is_le(work, work_max())
 
 def scan(s: String, state: Scan, +bytes: U32) -> Result<&1, &1, U32 & String, Unit>:
   match s:
@@ -47,11 +73,13 @@ def scan(s: String, state: Scan, +bytes: U32) -> Result<&1, &1, U32 & String, Un
       Done{Unit{}}
     case SCon{+c, rest}:
       do Result<&1, &1, U32 & String, Unit>:
-        guard(J.JSON.is_scalar(Char.to_u32(c)), "invalid Unicode scalar")
-        guard(U32.is_ge(bytes, width(Char.to_u32(c))), "JSON exceeds 1 MiB")
+        +code : U32 = Char.to_u32(c)
+        +size : U32 = width(code)
+        guard(J.JSON.is_scalar(code), "invalid Unicode scalar")
+        guard(U32.is_ge(bytes, size), "JSON exceeds 1 MiB")
         +next : Scan = scan_step(state, c)
         guard(scan_ok(next), "JSON depth/work limit")
-        scan(rest, next, U32.sub(bytes, width(Char.to_u32(c))))
+        scan(rest, next, U32.sub(bytes, size))
 
 def contains(keys: List<&2, String>, +key: String) -> Bool:
   match keys:
@@ -73,7 +101,12 @@ def number_matches(parsed: J.JSON, lex: String) -> Result<&1, &1, U32 & String, 
     case other:
       Fail{(22, "invalid number lexeme")}
 
-def valid(fuel: Nat, jobs: List<&2, Job>, bytes: U32, +cost: U32) -> Result<&1, &1, U32 & String, Unit>:
+def valid(
+  fuel: Nat,
+  jobs: List<&2, Job>,
+  bytes: U32,
+  +cost: U32,
+) -> Result<&1, &1, U32 & String, Unit>:
   match fuel jobs:
     case _ Nil{}:
       Done{Unit{}}
@@ -100,11 +133,11 @@ def valid(fuel: Nat, jobs: List<&2, Job>, bytes: U32, +cost: U32) -> Result<&1, 
                 valid(f, rest, left, cost)
             case J.Arr{items}:
               do Result<&1, &1, U32 & String, Unit>:
-                guard(U32.is_lt(depth, 64), "JSON depth limit")
+                guard(U32.is_lt(depth, depth_max()), "JSON depth limit")
                 valid(f, Con{Items{items, U32.inc(depth)}, rest}, bytes, cost)
             case J.Obj{fields}:
               do Result<&1, &1, U32 & String, Unit>:
-                guard(U32.is_lt(depth, 64), "JSON depth limit")
+                guard(U32.is_lt(depth, depth_max()), "JSON depth limit")
                 valid(f, Con{Fields{fields, U32.inc(depth), Nil{}, 0}, rest}, bytes, cost)
             case J.Member{key, v}:
               Fail{(22, "member outside object")}
@@ -123,21 +156,23 @@ def valid(fuel: Nat, jobs: List<&2, Job>, bytes: U32, +cost: U32) -> Result<&1, 
                 left : U32 <- string_cost(key, bytes)
                 +length : U32 = U32.from_nat(String.length(key))
                 guard(U32.is_le(length, 256) && U32.is_lt(count, 256), "JSON key limit")
+                # A duplicate check compares with every earlier key: (length+1)*(count+1).
                 +charge : U32 = U32.mul(U32.inc(length), U32.inc(count))
                 guard(U32.is_ge(cost, charge), "JSON key comparison limit")
                 guard(Bool.not(contains(seen, key)), "duplicate JSON key")
-                valid(f, Con{Val{value, depth}, Con{Fields{tail, depth, Con{key, seen}, U32.inc(count)}, rest}}, left, U32.sub(cost, charge))
+                remaining : Job = Fields{tail, depth, Con{key, seen}, U32.inc(count)}
+                valid(f, Con{Val{value, depth}, Con{remaining, rest}}, left, U32.sub(cost, charge))
             case Con{other, tail}:
               Fail{(22, "object field is not a member")}
 
 def validate(+value: J.JSON) -> Result<&1, &1, U32 & String, J.JSON>:
   do Result<&1, &1, U32 & String, J.JSON>:
-    valid(32768n, [Val{value, 0}], 1048576, 1048576)
+    valid(32768n, [Val{value, 0}], bytes_max(), bytes_max())
     return value
 
 def read(+text: String) -> Result<&1, &1, U32 & String, J.JSON>:
   do Result<&1, &1, U32 & String, J.JSON>:
-    scan(text, Scan{False{}, False{}, 0, 0}, 1048576)
+    scan(text, Scan{False{}, False{}, 0, 0}, bytes_max())
     value : J.JSON <- J.JSON.read(text)
     validate(value)
 
@@ -145,7 +180,7 @@ def encode(value: J.JSON) -> Result<&1, &1, U32 & String, String>:
   do Result<&1, &1, U32 & String, String>:
     checked : J.JSON <- validate(value)
     +text : String <- J.JSON.write(checked)
-    scan(text, Scan{False{}, False{}, 0, 0}, 1048576)
+    scan(text, Scan{False{}, False{}, 0, 0}, bytes_max())
     return text
 
 def field_pick(found: Bool, value: J.JSON, fallback: Maybe<&2, J.JSON>) -> Maybe<&2, J.JSON>:
@@ -188,10 +223,21 @@ def array(value: J.JSON) -> Maybe<&2, List<&2, J.JSON>>:
 type UTF8 is Data:
   UTF8{remaining: U32, code: U32, minimum: U32, reversed: String}
 
+# A lead byte below 224 starts a 2-byte sequence, below 240 a 3-byte one, else 4 bytes.
+# Each keeps its payload bits and the smallest scalar that sequence length may encode.
+def utf8_sequence(+b: U32, two: Bool, three: Bool, reversed: String) -> UTF8:
+  match two three:
+    case True{} _:
+      UTF8{1, U32.mod(b, 32), 128, reversed}
+    case False{} True{}:
+      UTF8{2, U32.mod(b, 16), 2048, reversed}
+    case False{} False{}:
+      UTF8{3, U32.mod(b, 8), 65536, reversed}
+
 def utf8_lead(+b: U32, reversed: String) -> Result<&1, &1, U32 & String, UTF8>:
   do Result<&1, &1, U32 & String, UTF8>:
     guard(U32.is_ge(b, 194) && U32.is_le(b, 244), "invalid UTF-8 lead")
-    return UTF8{Bool.pick(U32, U32.is_lt(b, 224), 1, Bool.pick(U32, U32.is_lt(b, 240), 2, 3)), U32.mod(b, Bool.pick(U32, U32.is_lt(b, 224), 32, Bool.pick(U32, U32.is_lt(b, 240), 16, 8))), Bool.pick(U32, U32.is_lt(b, 224), 128, Bool.pick(U32, U32.is_lt(b, 240), 2048, 65536)), reversed}
+    return utf8_sequence(b, U32.is_lt(b, 224), U32.is_lt(b, 240), reversed)
 
 def utf8_start(b: U32, reversed: String, ascii: Bool) -> Result<&1, &1, U32 & String, UTF8>:
   match ascii:
@@ -200,7 +246,13 @@ def utf8_start(b: U32, reversed: String, ascii: Bool) -> Result<&1, &1, U32 & St
     case False{}:
       utf8_lead(b, reversed)
 
-def utf8_continue(remaining: U32, +code: U32, minimum: U32, reversed: String, last: Bool) -> Result<&1, &1, U32 & String, UTF8>:
+def utf8_continue(
+  remaining: U32,
+  +code: U32,
+  minimum: U32,
+  reversed: String,
+  last: Bool,
+) -> Result<&1, &1, U32 & String, UTF8>:
   match last:
     case False{}:
       Done{UTF8{remaining, code, minimum, reversed}}
@@ -216,7 +268,8 @@ def utf8_step(state: UTF8, +b: U32) -> Result<&1, &1, U32 & String, UTF8>:
     case UTF8{+remaining, code, minimum, reversed}:
       do Result<&1, &1, U32 & String, UTF8>:
         guard(U32.is_ge(b, 128) && U32.is_le(b, 191), "invalid UTF-8 continuation")
-        utf8_continue(U32.sub(remaining, 1), U32.add(U32.mul(code, 64), U32.sub(b, 128)), minimum, reversed, U32.is_eq(remaining, 1))
+        extended : U32 = U32.add(U32.mul(code, 64), U32.sub(b, 128))
+        utf8_continue(U32.sub(remaining, 1), extended, minimum, reversed, U32.is_eq(remaining, 1))
 
 def utf8(fuel: Nat, bytes: List<&2, U32>, state: UTF8) -> Result<&1, &1, U32 & String, String>:
   match fuel bytes:

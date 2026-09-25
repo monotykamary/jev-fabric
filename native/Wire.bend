@@ -93,7 +93,9 @@ def noul_fields(fields: List<&2, J.JSON>) -> Bool:
     case Nil{}:
       True{}
     case Con{J.Member{+key, value}, tail}:
-      (String.eq(key, "true") || String.eq(key, "false")) && description(value) && noul_fields(tail)
+      (String.eq(key, "true") || String.eq(key, "false"))
+        && description(value)
+        && noul_fields(tail)
     case other:
       False{}
 
@@ -113,13 +115,19 @@ def question_kind(kind: String, +q: J.JSON) -> Result<&1, &1, U32 & String, Unit
         c : J.JSON <- need(q, "criteria")
         +fields : List<&2, J.JSON> <- object(c)
         +n : Nat = List.length(&2, J.JSON, fields)
-        Codec.guard(Nat.is_ge(n, 1n) && Nat.is_le(n, 255n) && choices(fields), "invalid Choice criteria")
+        Codec.guard(
+          Nat.is_ge(n, 1n) && Nat.is_le(n, 255n) && choices(fields),
+          "invalid Choice criteria",
+        )
     case "score":
       do Result<&1, &1, U32 & String, Unit>:
         c : J.JSON <- need(q, "criteria")
         +items : List<&2, J.JSON> <- array(c)
         +n : Nat = List.length(&2, J.JSON, items)
-        Codec.guard(Nat.is_ge(n, 2n) && Nat.is_le(n, 10n) && descriptions(items), "invalid Score criteria")
+        Codec.guard(
+          Nat.is_ge(n, 2n) && Nat.is_le(n, 10n) && descriptions(items),
+          "invalid Score criteria",
+        )
     case "noul":
       noul_criteria(Codec.field(q, "criteria"))
     case other:
@@ -179,7 +187,11 @@ def request(text: String) -> Result<&1, &1, U32 & String, J.JSON>:
     value : J.JSON <- Codec.read(text)
     validate_request(value)
 
-def defaulted(value: Maybe<&2, J.JSON>, fields: List<&2, J.JSON>, fallback: String) -> Result<&1, &1, U32 & String, String>:
+def defaulted(
+  value: Maybe<&2, J.JSON>,
+  fields: List<&2, J.JSON>,
+  fallback: String,
+) -> Result<&1, &1, U32 & String, String>:
   match value:
     case Some{v}:
       Codec.encode(J.Obj{fields})
@@ -258,7 +270,16 @@ def trailing(s: String, count: Nat) -> String & Nat:
     case other:
       (String.reverse(other), count)
 
-def scaled_digits(+digits: String, +up: Nat, +down: Nat, negative: Bool, +maximum: Nat) -> Result<&1, &1, U32 & String, Nat>:
+# A lexeme's value is digits * 10^(up - down): up counts the requested scale, a
+# positive exponent and trimmed trailing zeros; down counts fractional digits and a
+# negative exponent.
+def scaled_digits(
+  +digits: String,
+  +up: Nat,
+  +down: Nat,
+  negative: Bool,
+  +maximum: Nat,
+) -> Result<&1, &1, U32 & String, Nat>:
   match digits:
     case SNil{}:
       Done{0n}
@@ -272,23 +293,48 @@ def scaled_digits(+digits: String, +up: Nat, +down: Nat, negative: Bool, +maximu
         Codec.guard(Nat.is_le(n, maximum), "wire scalar out of range")
         return n
 
-def scaled_trimmed(pair: String & Nat, scale: Nat, pos: Nat, frac: Nat, neg: Nat, negative: Bool, maximum: Nat) -> Result<&1, &1, U32 & String, Nat>:
+def scaled_trimmed(
+  pair: String & Nat,
+  scale: Nat,
+  exp_up: Nat,
+  fractional: Nat,
+  exp_down: Nat,
+  negative: Bool,
+  maximum: Nat,
+) -> Result<&1, &1, U32 & String, Nat>:
   (trimmed, zeroes) = pair
-  scaled_digits(trimmed, Nat.add(scale, Nat.add(pos, zeroes)), Nat.add(frac, neg), negative, maximum)
+  up = Nat.add(scale, Nat.add(exp_up, zeroes))
+  scaled_digits(trimmed, up, Nat.add(fractional, exp_down), negative, maximum)
 
-def scaled_mantissa(m: Mantissa, e: Exponent, scale: Nat, maximum: Nat) -> Result<&1, &1, U32 & String, Nat>:
+# Strip leading zeros, then count trailing zeros so they can move into the exponent.
+def significant(digits: String) -> String & Nat:
+  trailing(String.reverse(zeros(digits)), 0n)
+
+def scaled_mantissa(
+  m: Mantissa,
+  e: Exponent,
+  scale: Nat,
+  maximum: Nat,
+) -> Result<&1, &1, U32 & String, Nat>:
   match m e:
-    case Mantissa{digits, frac, negative} Exponent{pos, neg}:
-      scaled_trimmed(trailing(String.reverse(zeros(digits)), 0n), scale, pos, frac, neg, negative, maximum)
+    case Mantissa{digits, fractional, negative} Exponent{exp_up, exp_down}:
+      scaled_trimmed(significant(digits), scale, exp_up, fractional, exp_down, negative, maximum)
 
-def scaled_parts(parts: List<&2, String>, scale: Nat, maximum: Nat) -> Result<&1, &1, U32 & String, Nat>:
+def plain_mantissa(text: String) -> Mantissa:
+  mantissa(text, SNil{}, 0n, False{}, False{})
+
+def scaled_parts(
+  parts: List<&2, String>,
+  scale: Nat,
+  maximum: Nat,
+) -> Result<&1, &1, U32 & String, Nat>:
   match parts:
     case Con{m, Nil{}}:
-      scaled_mantissa(mantissa(m, SNil{}, 0n, False{}, False{}), Exponent{0n, 0n}, scale, maximum)
+      scaled_mantissa(plain_mantissa(m), Exponent{0n, 0n}, scale, maximum)
     case Con{m, Con{e, Nil{}}}:
       do Result<&1, &1, U32 & String, Nat>:
         exp : Exponent <- exponent(e)
-        scaled_mantissa(mantissa(m, SNil{}, 0n, False{}, False{}), exp, scale, maximum)
+        scaled_mantissa(plain_mantissa(m), exp, scale, maximum)
     case other:
       Fail{(22, "invalid numeric scalar")}
 
@@ -307,48 +353,83 @@ def scalar(value: J.JSON, scale: Nat, maximum: Nat) -> Result<&1, &1, U32 & Stri
 type Decimal is Data:
   Decimal{whole: Nat, fraction: String}
 
-def decimal_checked(+whole: Nat, +fraction: String, +maximum: Nat) -> Result<&1, &1, U32 & String, Decimal>:
+def decimal_checked(
+  +whole: Nat,
+  +fraction: String,
+  +maximum: Nat,
+) -> Result<&1, &1, U32 & String, Decimal>:
   do Result<&1, &1, U32 & String, Decimal>:
-    Codec.guard(Nat.is_lt(whole, maximum) || (Nat.is_eq(whole, maximum) && String.is_empty(fraction)), "wire scalar out of range")
+    Codec.guard(
+      Nat.is_lt(whole, maximum) || (Nat.is_eq(whole, maximum) && String.is_empty(fraction)),
+      "wire scalar out of range",
+    )
     return Decimal{whole, fraction}
 
-def decimal_split(+digits: String, +up: Nat, +down: Nat, maximum: Nat, whole_side: Bool) -> Result<&1, &1, U32 & String, Decimal>:
+# len(digits) + up - down digits precede the decimal point. whole_side holds when
+# that count is non-negative; otherwise the fraction needs leading zeros.
+def decimal_split(
+  +digits: String,
+  +up: Nat,
+  +down: Nat,
+  maximum: Nat,
+  whole_side: Bool,
+) -> Result<&1, &1, U32 & String, Decimal>:
   match whole_side:
     case True{}:
       do Result<&1, &1, U32 & String, Decimal>:
         +count : Nat = Nat.sub(Nat.add(String.length(digits), up), down)
         Codec.guard(Nat.is_le(count, 1n), "wire scalar out of range")
-        whole : Nat <- nat_result(Nat.read("0" ++ String.take(digits, count) ++ String.repeat("0", Nat.sub(count, String.length(digits)))))
+        padding : String = String.repeat("0", Nat.sub(count, String.length(digits)))
+        whole : Nat <- nat_result(Nat.read("0" ++ String.take(digits, count) ++ padding))
         decimal_checked(whole, String.drop(digits, count), maximum)
     case False{}:
-      decimal_checked(0n, String.repeat("0", Nat.sub(down, Nat.add(up, String.length(digits)))) ++ digits, maximum)
+      leading = String.repeat("0", Nat.sub(down, Nat.add(up, String.length(digits))))
+      decimal_checked(0n, leading ++ digits, maximum)
 
-def decimal_digits(digits: String, +up: Nat, +down: Nat, negative: Bool, maximum: Nat) -> Result<&1, &1, U32 & String, Decimal>:
+def decimal_digits(
+  digits: String,
+  +up: Nat,
+  +down: Nat,
+  negative: Bool,
+  maximum: Nat,
+) -> Result<&1, &1, U32 & String, Decimal>:
   match digits:
     case SNil{}:
       Done{Decimal{0n, ""}}
     case +other:
       do Result<&1, &1, U32 & String, Decimal>:
         Codec.guard(Bool.not(negative), "negative wire scalar")
-        decimal_split(other, up, down, maximum, Nat.is_ge(Nat.add(String.length(other), up), down))
+        whole_side : Bool = Nat.is_ge(Nat.add(String.length(other), up), down)
+        decimal_split(other, up, down, maximum, whole_side)
 
-def decimal_trimmed(pair: String & Nat, pos: Nat, frac: Nat, neg: Nat, negative: Bool, maximum: Nat) -> Result<&1, &1, U32 & String, Decimal>:
+def decimal_trimmed(
+  pair: String & Nat,
+  exp_up: Nat,
+  fractional: Nat,
+  exp_down: Nat,
+  negative: Bool,
+  maximum: Nat,
+) -> Result<&1, &1, U32 & String, Decimal>:
   (trimmed, zeroes) = pair
-  decimal_digits(trimmed, Nat.add(pos, zeroes), Nat.add(frac, neg), negative, maximum)
+  decimal_digits(trimmed, Nat.add(exp_up, zeroes), Nat.add(fractional, exp_down), negative, maximum)
 
-def decimal_mantissa(m: Mantissa, e: Exponent, maximum: Nat) -> Result<&1, &1, U32 & String, Decimal>:
+def decimal_mantissa(
+  m: Mantissa,
+  e: Exponent,
+  maximum: Nat,
+) -> Result<&1, &1, U32 & String, Decimal>:
   match m e:
-    case Mantissa{digits, frac, negative} Exponent{pos, neg}:
-      decimal_trimmed(trailing(String.reverse(zeros(digits)), 0n), pos, frac, neg, negative, maximum)
+    case Mantissa{digits, fractional, negative} Exponent{exp_up, exp_down}:
+      decimal_trimmed(significant(digits), exp_up, fractional, exp_down, negative, maximum)
 
 def decimal_parts(parts: List<&2, String>, maximum: Nat) -> Result<&1, &1, U32 & String, Decimal>:
   match parts:
     case Con{m, Nil{}}:
-      decimal_mantissa(mantissa(m, SNil{}, 0n, False{}, False{}), Exponent{0n, 0n}, maximum)
+      decimal_mantissa(plain_mantissa(m), Exponent{0n, 0n}, maximum)
     case Con{m, Con{e, Nil{}}}:
       do Result<&1, &1, U32 & String, Decimal>:
         exp : Exponent <- exponent(e)
-        decimal_mantissa(mantissa(m, SNil{}, 0n, False{}, False{}), exp, maximum)
+        decimal_mantissa(plain_mantissa(m), exp, maximum)
     case other:
       Fail{(22, "invalid numeric scalar")}
 
@@ -362,38 +443,47 @@ def decimal(value: J.JSON, maximum: Nat) -> Result<&1, &1, U32 & String, Decimal
 def probability(value: J.JSON) -> Result<&1, &1, U32 & String, Decimal>:
   decimal(value, 1n)
 
+# Prepend the low decimal digit of a column sum (digits plus carry) as a character.
+def push_digit(+sum: U32, acc: String) -> String:
+  SCon{Chr{U32.add(48, U32.mod(sum, 10))}, acc}
+
+# Adds two reversed fraction digit strings; the result drops trailing zeros.
 def fraction_add(a: String, b: String, carry: U32, acc: String) -> Decimal:
   match a b:
     case SNil{} SNil{}:
       Decimal{U32.to_nat(carry), String.reverse(zeros(String.reverse(acc)))}
     case SCon{Chr{x}, at} SCon{Chr{y}, bt}:
       +sum = U32.add(U32.sub(U32.add(x, y), 96), carry)
-      fraction_add(at, bt, U32.div(sum, 10), SCon{Chr{U32.add(48, U32.mod(sum, 10))}, acc})
+      fraction_add(at, bt, U32.div(sum, 10), push_digit(sum, acc))
     case SCon{Chr{x}, at} SNil{}:
       +sum = U32.add(U32.sub(x, 48), carry)
-      fraction_add(at, SNil{}, U32.div(sum, 10), SCon{Chr{U32.add(48, U32.mod(sum, 10))}, acc})
+      fraction_add(at, SNil{}, U32.div(sum, 10), push_digit(sum, acc))
     case SNil{} SCon{Chr{y}, bt}:
       +sum = U32.add(U32.sub(y, 48), carry)
-      fraction_add(SNil{}, bt, U32.div(sum, 10), SCon{Chr{U32.add(48, U32.mod(sum, 10))}, acc})
+      fraction_add(SNil{}, bt, U32.div(sum, 10), push_digit(sum, acc))
 
 def decimal_carry(fraction: Decimal, a: Nat, b: Nat) -> Decimal:
   match fraction:
     case Decimal{carry, digits}:
       Decimal{Nat.add(carry, Nat.add(a, b)), digits}
 
+# Right-pads fraction digits with zeros to width (unchanged when already that long).
+def pad_fraction(+digits: String, width: Nat) -> String:
+  digits ++ String.repeat("0", Nat.sub(width, String.length(digits)))
+
 def decimal_add(a: Decimal, b: Decimal) -> Decimal:
   match a b:
     case Decimal{aw, +af} Decimal{bw, +bf}:
-      +al = String.length(af)
-      +bl = String.length(bf)
-      decimal_carry(fraction_add(String.reverse(af ++ String.repeat("0", Nat.sub(bl, al))), String.reverse(bf ++ String.repeat("0", Nat.sub(al, bl))), 0, ""), aw, bw)
+      a_reversed = String.reverse(pad_fraction(af, String.length(bf)))
+      b_reversed = String.reverse(pad_fraction(bf, String.length(af)))
+      decimal_carry(fraction_add(a_reversed, b_reversed, 0, ""), aw, bw)
 
 def decimal_le(a: Decimal, b: Decimal) -> Bool:
   match a b:
     case Decimal{+aw, +af} Decimal{+bw, +bf}:
-      +al = String.length(af)
-      +bl = String.length(bf)
-      Nat.is_lt(aw, bw) || (Nat.is_eq(aw, bw) && String.is_le(af ++ String.repeat("0", Nat.sub(bl, al)), bf ++ String.repeat("0", Nat.sub(al, bl))))
+      a_fraction = pad_fraction(af, String.length(bf))
+      b_fraction = pad_fraction(bf, String.length(af))
+      Nat.is_lt(aw, bw) || (Nat.is_eq(aw, bw) && String.is_le(a_fraction, b_fraction))
 
 def usage(value: J.JSON) -> Result<&1, &1, U32 & String, Nat & Nat>:
   do Result<&1, &1, U32 & String, Nat & Nat>:
@@ -422,7 +512,11 @@ def indexed(items: List<&2, J.JSON>, +index: Nat) -> List<&2, J.JSON>:
     case Con{head, tail}:
       Con{J.Member{Nat.show(index), head}, indexed(tail, 1n+index)}
 
-def probability_sum(expected: List<&2, J.JSON>, +actual: J.JSON, acc: Decimal) -> Result<&1, &1, U32 & String, Decimal>:
+def probability_sum(
+  expected: List<&2, J.JSON>,
+  +actual: J.JSON,
+  acc: Decimal,
+) -> Result<&1, &1, U32 & String, Decimal>:
   match expected:
     case Nil{}:
       Done{acc}
@@ -434,7 +528,10 @@ def probability_sum(expected: List<&2, J.JSON>, +actual: J.JSON, acc: Decimal) -
     case other:
       Fail{(22, "invalid probability keys")}
 
-def ordered(expected: List<&2, J.JSON>, +actual: J.JSON) -> Result<&1, &1, U32 & String, List<&2, J.JSON>>:
+def ordered(
+  expected: List<&2, J.JSON>,
+  +actual: J.JSON,
+) -> Result<&1, &1, U32 & String, List<&2, J.JSON>>:
   match expected:
     case Nil{}:
       Done{Nil{}}
@@ -455,21 +552,38 @@ def common(+answer: J.JSON, +expected: List<&2, J.JSON>) -> Result<&1, &1, U32 &
     confidence_n : Decimal <- probability(confidence)
     +p : J.JSON <- need(answer, "probabilities")
     fields : List<&2, J.JSON> <- object(p)
-    Codec.guard(Nat.is_eq(List.length(&2, J.JSON, fields), List.length(&2, J.JSON, expected)), "probability key count mismatch")
+    Codec.guard(
+      Nat.is_eq(List.length(&2, J.JSON, fields), List.length(&2, J.JSON, expected)),
+      "probability key count mismatch",
+    )
     +sum : Decimal <- probability_sum(expected, p, Decimal{0n, ""})
-    Codec.guard(decimal_le(Decimal{0n, "98"}, sum) && decimal_le(sum, Decimal{1n, "02"}), "probability mass outside tolerance")
+    Codec.guard(
+      decimal_le(Decimal{0n, "98"}, sum) && decimal_le(sum, Decimal{1n, "02"}),
+      "probability mass outside tolerance",
+    )
     rows : List<&2, J.JSON> <- ordered(expected, p)
     return Common{confidence, J.Obj{rows}}
 
 def choice_answer(fields: Common, selected: J.JSON) -> J.JSON:
   match fields:
     case Common{confidence, probabilities}:
-      J.Obj{[J.Member{"type", J.Str{"choice"}}, J.Member{"choice", selected}, J.Member{"confidence", confidence}, J.Member{"probabilities", probabilities}]}
+      J.Obj{[
+        J.Member{"type", J.Str{"choice"}},
+        J.Member{"choice", selected},
+        J.Member{"confidence", confidence},
+        J.Member{"probabilities", probabilities},
+      ]}
 
 def score_answer(fields: Common, score: J.JSON, legend: List<&2, J.JSON>) -> J.JSON:
   match fields:
     case Common{confidence, probabilities}:
-      J.Obj{[J.Member{"type", J.Str{"score"}}, J.Member{"score", score}, J.Member{"confidence", confidence}, J.Member{"probabilities", probabilities}, J.Member{"legend", J.Obj{legend}}]}
+      J.Obj{[
+        J.Member{"type", J.Str{"score"}},
+        J.Member{"score", score},
+        J.Member{"confidence", confidence},
+        J.Member{"probabilities", probabilities},
+        J.Member{"legend", J.Obj{legend}},
+      ]}
 
 def answer_kind(kind: String, q: J.JSON, +a: J.JSON) -> Result<&1, &1, U32 & String, J.JSON>:
   match kind:
@@ -493,7 +607,8 @@ def answer_kind(kind: String, q: J.JSON, +a: J.JSON) -> Result<&1, &1, U32 & Str
         +levels : List<&2, J.JSON> <- array(c)
         +expected : List<&2, J.JSON> = indexed(levels, 0n)
         +score : J.JSON <- need(a, "score")
-        checked : Decimal <- decimal(score, Nat.sub(List.length(&2, J.JSON, levels), 1n))
+        top_level : Nat = Nat.sub(List.length(&2, J.JSON, levels), 1n)
+        checked : Decimal <- decimal(score, top_level)
         fields : Common <- common(a, expected)
         return score_answer(fields, score, expected)
     case other:
@@ -509,7 +624,10 @@ def answer(+q: J.JSON, +a: J.JSON) -> Result<&1, &1, U32 & String, J.JSON>:
     Codec.guard(String.eq(kind, actual), "answer type mismatch")
     answer_kind(kind, q, a)
 
-def answers(questions: List<&2, J.JSON>, +actual: J.JSON) -> Result<&1, &1, U32 & String, List<&2, J.JSON>>:
+def answers(
+  questions: List<&2, J.JSON>,
+  +actual: J.JSON,
+) -> Result<&1, &1, U32 & String, List<&2, J.JSON>>:
   match questions:
     case Nil{}:
       Done{Nil{}}
@@ -535,9 +653,17 @@ def normalize(+value: J.JSON, request: J.JSON) -> Result<&1, &1, U32 & String, J
     +qfields : List<&2, J.JSON> <- object(qs)
     +raw_answers : J.JSON <- need(value, "answers")
     afields : List<&2, J.JSON> <- object(raw_answers)
-    Codec.guard(Nat.is_eq(List.length(&2, J.JSON, qfields), List.length(&2, J.JSON, afields)), "answer key count mismatch")
+    Codec.guard(
+      Nat.is_eq(List.length(&2, J.JSON, qfields), List.length(&2, J.JSON, afields)),
+      "answer key count mismatch",
+    )
     safe : List<&2, J.JSON> <- answers(qfields, raw_answers)
-    return J.Obj{[J.Member{"model", m}, J.Member{"answers", J.Obj{safe}}, J.Member{"usage", J.Obj{[J.Member{"input_tokens", input}, J.Member{"output_tokens", output}]}}]}
+    tokens : J.JSON = J.Obj{[J.Member{"input_tokens", input}, J.Member{"output_tokens", output}]}
+    return J.Obj{[
+      J.Member{"model", m},
+      J.Member{"answers", J.Obj{safe}},
+      J.Member{"usage", tokens},
+    ]}
 
 def response(text: String, request: J.JSON) -> Result<&1, &1, U32 & String, J.JSON>:
   do Result<&1, &1, U32 & String, J.JSON>:
