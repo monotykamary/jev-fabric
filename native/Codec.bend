@@ -190,14 +190,24 @@ def field_pick(found: Bool, value: J.JSON, fallback: Maybe<&2, J.JSON>) -> Maybe
     case False{}:
       fallback
 
+# `found` carries the first match, so members after it are never compared.
+def find_from(
+  fields: List<&2, J.JSON>,
+  +key: String,
+  found: Maybe<&2, J.JSON>,
+) -> Maybe<&2, J.JSON>:
+  match fields found:
+    case _ Some{value}:
+      Some{value}
+    case Nil{} None{}:
+      None{}
+    case Con{J.Member{name, value}, tail} None{}:
+      find_from(tail, key, field_pick(String.eq(name, key), value, None{}))
+    case Con{other, tail} None{}:
+      None{}
+
 def find_field(fields: List<&2, J.JSON>, +key: String) -> Maybe<&2, J.JSON>:
-  match fields:
-    case Nil{}:
-      None{}
-    case Con{J.Member{name, +value}, tail}:
-      field_pick(String.eq(name, key), value, find_field(tail, key))
-    case Con{other, tail}:
-      None{}
+  find_from(fields, key, None{})
 
 def field(value: J.JSON, key: String) -> Maybe<&2, J.JSON>:
   match value:

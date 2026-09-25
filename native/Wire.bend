@@ -485,16 +485,21 @@ def decimal_le(a: Decimal, b: Decimal) -> Bool:
       b_fraction = pad_fraction(bf, String.length(af))
       Nat.is_lt(aw, bw) || (Nat.is_eq(aw, bw) && String.is_le(a_fraction, b_fraction))
 
-def usage(value: J.JSON) -> Result<&1, &1, U32 & String, Nat & Nat>:
+# Token counts of a response that has already passed Codec.validate.
+def usage_counts(value: J.JSON) -> Result<&1, &1, U32 & String, Nat & Nat>:
   do Result<&1, &1, U32 & String, Nat & Nat>:
-    checked : J.JSON <- Codec.validate(value)
-    u : J.JSON <- need(checked, "usage")
+    u : J.JSON <- need(value, "usage")
     +fields : List<&2, J.JSON> <- object(u)
     i : J.JSON <- need(J.Obj{fields}, "input_tokens")
     o : J.JSON <- need(J.Obj{fields}, "output_tokens")
     input : Nat <- scalar(i, 0n, Nat.read.max())
     output : Nat <- scalar(o, 0n, Nat.read.max())
     return (input, output)
+
+def usage(value: J.JSON) -> Result<&1, &1, U32 & String, Nat & Nat>:
+  do Result<&1, &1, U32 & String, Nat & Nat>:
+    checked : J.JSON <- Codec.validate(value)
+    usage_counts(checked)
 
 def named(fields: List<&2, J.JSON>, +key: String) -> Bool:
   match fields:
@@ -640,12 +645,27 @@ def answers(
     case other:
       Fail{(22, "invalid question object")}
 
-def normalize(+value: J.JSON, request: J.JSON) -> Result<&1, &1, U32 & String, J.JSON>:
-  do Result<&1, &1, U32 & String, J.JSON>:
+# A normalized reply together with the token counts parsed from its usage.
+type Reply is Data:
+  Reply{value: J.JSON, input: Nat, output: Nat}
+
+def reply_of(value: J.JSON, counts: Nat & Nat) -> Reply:
+  (input, output) = counts
+  Reply{value, input, output}
+
+def reply_value(reply: Reply) -> J.JSON:
+  match reply:
+    case Reply{value, input, output}:
+      value
+
+# `value` must already have passed Codec.validate (Codec.read does), so its usage
+# counts are parsed without validating the whole response a second time.
+def normalize(+value: J.JSON, request: J.JSON) -> Result<&1, &1, U32 & String, Reply>:
+  do Result<&1, &1, U32 & String, Reply>:
     fields : List<&2, J.JSON> <- object(value)
     +m : J.JSON <- need(value, "model")
     model(m)
-    checked_usage : Nat & Nat <- usage(value)
+    counts : Nat & Nat <- usage_counts(value)
     +u : J.JSON <- need(value, "usage")
     input : J.JSON <- need(u, "input_tokens")
     output : J.JSON <- need(u, "output_tokens")
@@ -659,14 +679,31 @@ def normalize(+value: J.JSON, request: J.JSON) -> Result<&1, &1, U32 & String, J
     )
     safe : List<&2, J.JSON> <- answers(qfields, raw_answers)
     tokens : J.JSON = J.Obj{[J.Member{"input_tokens", input}, J.Member{"output_tokens", output}]}
-    return J.Obj{[
+    normalized : J.JSON = J.Obj{[
       J.Member{"model", m},
       J.Member{"answers", J.Obj{safe}},
       J.Member{"usage", tokens},
     ]}
+    return reply_of(normalized, counts)
 
-def response(text: String, request: J.JSON) -> Result<&1, &1, U32 & String, J.JSON>:
-  do Result<&1, &1, U32 & String, J.JSON>:
+def reply(text: String, request: J.JSON) -> Result<&1, &1, U32 & String, Reply>:
+  do Result<&1, &1, U32 & String, Reply>:
     req : J.JSON <- validate_request(request)
     value : J.JSON <- Codec.read(text)
     normalize(value, req)
+
+def response(text: String, request: J.JSON) -> Result<&1, &1, U32 & String, J.JSON>:
+  do Result<&1, &1, U32 & String, J.JSON>:
+    normalized : Reply <- reply(text, request)
+    return reply_value(normalized)
+
+# The counts normalize parsed, once the normalized reply itself passes Codec.validate.
+# This matches usage(value) on that reply without re-reading its usage object. The
+# validation stays: a score legend copies request criteria, so a valid response can
+# still normalize past the JSON size limits.
+def reply_usage(reply: Reply) -> Result<&1, &1, U32 & String, Nat & Nat>:
+  match reply:
+    case Reply{value, input, output}:
+      do Result<&1, &1, U32 & String, Nat & Nat>:
+        checked : J.JSON <- Codec.validate(value)
+        return (input, output)

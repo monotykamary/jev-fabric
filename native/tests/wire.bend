@@ -38,6 +38,57 @@ def response(text: String) -> Result<&1, &1, U32 & String, J.JSON>:
     req : J.JSON <- Wire.request(request_text())
     Wire.response(text, req)
 
+def counts(value: Result<&1, &1, U32 & String, Nat & Nat>, input: Nat, output: Nat) -> Bool:
+  match value:
+    case Done{pair}:
+      (actual_input, actual_output) = pair
+      Nat.is_eq(actual_input, input) && Nat.is_eq(actual_output, output)
+    case Fail{e}:
+      False{}
+
+def counted(value: Result<&1, &1, U32 & String, Nat & Nat>) -> Bool:
+  match value:
+    case Done{pair}:
+      True{}
+    case Fail{e}:
+      False{}
+
+def reply(text: String, request: String) -> Result<&1, &1, U32 & String, Wire.Reply>:
+  do Result<&1, &1, U32 & String, Wire.Reply>:
+    req : J.JSON <- Wire.request(request)
+    Wire.reply(text, req)
+
+# The counts JevCore accounts from a reply, via the fast path and via Wire.usage.
+def reply_usage(text: String, request: String) -> Result<&1, &1, U32 & String, Nat & Nat>:
+  do Result<&1, &1, U32 & String, Nat & Nat>:
+    normalized : Wire.Reply <- reply(text, request)
+    Wire.reply_usage(normalized)
+
+def response_for(text: String, request: String) -> Result<&1, &1, U32 & String, J.JSON>:
+  do Result<&1, &1, U32 & String, J.JSON>:
+    req : J.JSON <- Wire.request(request)
+    Wire.response(text, req)
+
+def response_usage(text: String, request: String) -> Result<&1, &1, U32 & String, Nat & Nat>:
+  do Result<&1, &1, U32 & String, Nat & Nat>:
+    normalized : J.JSON <- response_for(text, request)
+    Wire.usage(normalized)
+
+# A score legend copies request criteria into the reply: a request string near 1 MiB
+# plus long response lexemes yields a valid response whose normalized reply is too big.
+def large_legend_request() -> String:
+  "{\"state\":{},\"questions\":{\"q\":{\"type\":\"score\",\"instructions\":\"x\","
+    ++ "\"criteria\":[\"a\",\"" ++ String.repeat("b", 1048000n) ++ "\"]}}}"
+
+def long_half() -> String:
+  "0.5" ++ String.repeat("0", 1000n)
+
+def large_legend_response() -> String:
+  "{\"model\":\"jev\",\"answers\":{\"q\":{\"type\":\"score\",\"score\":1,"
+    ++ "\"confidence\":" ++ long_half()
+    ++ ",\"probabilities\":{\"0\":" ++ long_half() ++ ",\"1\":" ++ long_half() ++ "}}},"
+    ++ "\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}"
+
 def check(tests: List<&2, Bool>, n: Nat) -> IO(Unit):
   match tests:
     case Nil{}:
@@ -83,5 +134,11 @@ def main() -> IO(Unit):
     Bool.not(ok(response(response_text("true")))),
     Bool.not(ok(response(
       "{\"model\":42,\"answers\":{},\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}"
-    )))
+    ))),
+    counts(reply_usage(response_text("0.1"), request_text()), 1n, 2n),
+    counts(response_usage(response_text("0.1"), request_text()), 1n, 2n),
+    Bool.not(counted(reply_usage(response_text("true"), request_text()))),
+    ok(response_for(large_legend_response(), large_legend_request())),
+    Bool.not(counted(response_usage(large_legend_response(), large_legend_request()))),
+    Bool.not(counted(reply_usage(large_legend_response(), large_legend_request())))
   ], 0n)
