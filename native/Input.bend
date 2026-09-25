@@ -11,7 +11,9 @@ def ready(bytes: List<&2, U32>, ok: Bool) -> Result<&1, &1, U32 & String, String
     case True{}:
       Codec.decode_utf8(bytes)
 
-def captured(result: Result<&1, &1, U32 & String, Process.RawBytes>) -> Result<&1, &1, U32 & String, String>:
+def captured(
+  result: Result<&1, &1, U32 & String, Process.RawBytes>,
+) -> Result<&1, &1, U32 & String, String>:
   match result:
     case Fail{e}:
       Fail{(1, "Unable to read input file")}
@@ -21,5 +23,10 @@ def captured(result: Result<&1, &1, U32 & String, Process.RawBytes>) -> Result<&
 
 def read(path: String) -> IO(Result<&1, &1, U32 & String, String>):
   do IO<Result<&1, &1, U32 & String, String>>:
-    result : Result<&1, &1, U32 & String, Process.RawBytes> <- Process.capture(["/bin/cat", "--", path], "", 5000, 1048577)
+    result : Result<&1, &1, U32 & String, Process.RawBytes> <- Process.capture(
+      ["/bin/cat", "--", path],
+      "",
+      5000,
+      1048577,
+    )
     return captured(result)
