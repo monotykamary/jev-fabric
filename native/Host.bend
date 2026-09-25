@@ -2,7 +2,15 @@ import Base
 
 # OS/private-filesystem boundary only. Job states, deadlines, events and polling
 # policy live in Jobs.bend. All paths are relative to a checked private root.
-def jfh_os(op: U32, id: String, name: String, text: String, argv: List<String>, limit: U32) -> IO(Result<&1, &1, U32 & String, String>):
+# Operations: 0 self, 1 create, 2 read, 3 write, 4 claim, 5 alive, 6 spawn.
+def jfh_os(
+  op: U32,
+  id: String,
+  name: String,
+  text: String,
+  argv: List<String>,
+  limit: U32,
+) -> IO(Result<&1, &1, U32 & String, String>):
   import "./host.c"
 
 # The writer is exclusively created; readers get independent owned descriptors.
@@ -25,6 +33,7 @@ def read(id: String, name: String, limit: U32) -> IO(String):
 
 def write(id: String, name: String, text: String) -> IO(Unit):
   do IO<Unit>:
+    # host.c rejects text longer than this limit.
     ignored : String <- IO.try(String, jfh_os(3, id, name, text, [], 1048576))
     return Unit{}
 

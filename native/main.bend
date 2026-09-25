@@ -63,8 +63,28 @@ def validate_file(path: String) -> IO(Unit):
     value : Codec.Value <- IO.pass(Codec.Value, Wire.request(text))
     print_value(value)
 
+def usage_text() -> String:
+  "jev-fabric native Bend\n"
+    ++ "usage: build/jev-fabric -- <command>\n"
+    ++ "  exec [--timeout-ms N] [--stdin] [--] <command> [args...]\n"
+    ++ "  run [--timeout-ms N] [--] <program.bend> [args...]\n"
+    ++ "  validate <request.json>\n"
+    ++ "  jev [--timeout-ms N] <request.json> [max-tokens]\n"
+    ++ "  start [--timeout-ms N] [--] <command> [args...]\n"
+    ++ "  status <id> | events <id> [after-sequence]\n"
+    ++ "  watch [--timeout-ms N] <id> <literal>\n"
+    ++ "  wait [--timeout-ms N] <id> | stop <id>\n"
+    ++ "Defaults: work 1h, Jev 30s, wait 30s, watch 5s. Timers are ceilings, not delays.\n"
+    ++ "Configure JEV_FABRIC_TIMEOUT_MS, JEV_FABRIC_JEV_TIMEOUT_MS,"
+    ++ " JEV_FABRIC_WAIT_MS, JEV_FABRIC_WATCH_MS.\n"
+    ++ "Legacy positional milliseconds remain supported."
+    ++ " Prefix options stop at the command/file; -- escapes numeric command names.\n"
+    ++ "Native trusted code, not a sandbox. Shell interpretation is explicit.\n"
+    ++ "Jev uses provider environment credentials or JEV_CREDENTIAL_COMMAND,"
+    ++ " private curl stdin, and no automatic retries."
+
 def usage() -> IO(Unit):
-  IO.print("jev-fabric native Bend\nusage: build/jev-fabric -- <command>\n  exec [--timeout-ms N] [--stdin] [--] <command> [args...]\n  run [--timeout-ms N] [--] <program.bend> [args...]\n  validate <request.json>\n  jev [--timeout-ms N] <request.json> [max-tokens]\n  start [--timeout-ms N] [--] <command> [args...]\n  status <id> | events <id> [after-sequence]\n  watch [--timeout-ms N] <id> <literal>\n  wait [--timeout-ms N] <id> | stop <id>\nDefaults: work 1h, Jev 30s, wait 30s, watch 5s. Timers are ceilings, not delays.\nConfigure JEV_FABRIC_TIMEOUT_MS, JEV_FABRIC_JEV_TIMEOUT_MS, JEV_FABRIC_WAIT_MS, JEV_FABRIC_WATCH_MS.\nLegacy positional milliseconds remain supported. Prefix options stop at the command/file; -- escapes numeric command names.\nNative trusted code, not a sandbox. Shell interpretation is explicit.\nJev uses provider environment credentials or JEV_CREDENTIAL_COMMAND, private curl stdin, and no automatic retries.")
+  IO.print(usage_text())
 
 def dispatch(args: List<String>) -> IO(Unit):
   match args:

@@ -3,6 +3,7 @@ import ./Host.bend as Host
 import ./Process.bend as Process
 import ./Json.bend as Json
 import ./Streams.bend as Streams
+import ./Time.bend as Time
 
 # Acceptance ledger: native self-spawn and detached lease; private bounded store;
 # running/terminal/wait/stop idempotency; literal argv; live bounded replay; UTF-8
@@ -13,13 +14,34 @@ import ./Streams.bend as Streams
 # omittedBytes discloses skips, sequence gaps disclose replay eviction, and
 # process.spool_limit discloses reaching the first-byte cap (possibly clipped).
 # No protocol-line monitor/filter API or semantic task-completion claims.
+
+# First-byte spool cap per stream; also the largest private file Host reads.
+def spool_limit() -> U32:
+  1048576
+
+# Bytes observed per stream per tick.
+def window() -> U32:
+  2048
+
+# Size bound for the "stop" and "ready" marker files.
+def marker_limit() -> U32:
+  16
+
+def max_jobs() -> U32:
+  1024
+
 type Ring is Data:
   Ring{next: U32, newest: List<&2, String>}
 
+# Keeps the 64 newest events, newest first.
 def event(ring: Ring, kind: String, data: String) -> Ring:
   match ring:
     case Ring{+next, newest}:
-      Ring{U32.inc(next), Con{"{\"sequence\":" ++ U32.show(next) ++ ",\"type\":" ++ Json.quote(kind) ++ ",\"data\":" ++ data ++ "}", List.take(&2, String, newest, 63n)}}
+      line : String = "{\"sequence\":" ++ U32.show(next)
+        ++ ",\"type\":" ++ Json.quote(kind)
+        ++ ",\"data\":" ++ data
+        ++ "}"
+      Ring{U32.inc(next), Con{line, List.take(&2, String, newest, 63n)}}
 
 def lines(items: List<&2, String>) -> String:
   match items:
@@ -33,13 +55,31 @@ def save(id: String, ring: Ring) -> IO(Unit):
     case Ring{next, newest}:
       Host.write(id, "events.jsonl", lines(List.reverse(&2, String, newest)))
 
-def output(ring: Ring, stream: String, offset: U32, count: U32, omitted: U32, text: String, changed: Bool) -> Ring:
+def output(
+  ring: Ring,
+  stream: String,
+  offset: U32,
+  count: U32,
+  omitted: U32,
+  text: String,
+  changed: Bool,
+) -> Ring:
   match changed:
     case False{}:
       ring
     case True{}:
-      event(ring, "process.output", "{\"stream\":" ++ Json.quote(stream) ++ ",\"offset\":" ++ U32.show(offset) ++ ",\"bytes\":" ++ U32.show(count) ++ ",\"omittedBytes\":" ++ U32.show(omitted) ++ ",\"text\":" ++ Json.quote(text) ++ "}")
+      event(
+        ring,
+        "process.output",
+        "{\"stream\":" ++ Json.quote(stream)
+          ++ ",\"offset\":" ++ U32.show(offset)
+          ++ ",\"bytes\":" ++ U32.show(count)
+          ++ ",\"omittedBytes\":" ++ U32.show(omitted)
+          ++ ",\"text\":" ++ Json.quote(text)
+          ++ "}",
+      )
 
+# Replaces a receipt's opening brace with the job id and spool limit fields.
 def with_id(id: String, receipt: String) -> String:
   match receipt:
     case SCon{head, tail}:
@@ -48,17 +88,24 @@ def with_id(id: String, receipt: String) -> String:
       "{}"
 
 def failed(id: String, message: String) -> String:
-  with_id(id, "{\"schemaVersion\":1,\"state\":\"failed\",\"exitCode\":null,\"error\":" ++ Json.quote(message) ++ "}")
+  with_id(
+    id,
+    "{\"schemaVersion\":1,\"state\":\"failed\",\"exitCode\":null,\"error\":"
+      ++ Json.quote(message)
+      ++ "}",
+  )
 
 def running(id: String) -> String:
-  "{\"schemaVersion\":1,\"id\":" ++ Json.quote(id) ++ ",\"state\":\"running\",\"spoolLimitBytes\":1048576}"
+  "{\"schemaVersion\":1,\"id\":" ++ Json.quote(id)
+    ++ ",\"state\":\"running\",\"spoolLimitBytes\":1048576}"
 
 def failure_result(id: String, stopped: String) -> String:
   match stopped:
     case SNil{}:
       failed(id, "command launch failed")
     case SCon{head, tail}:
-      with_id(id, Process.show(Process.Report{143, False{}, True{}, False{}, False{}, "", ""}))
+      report : Process.Report = Process.Report{143, False{}, True{}, False{}, False{}, "", ""}
+      with_id(id, Process.show(report))
 
 def record_result(+id: String, result: Result<&1, &1, U32 & String, Process.Raw>) -> IO(Unit):
   match result:
@@ -66,13 +113,25 @@ def record_result(+id: String, result: Result<&1, &1, U32 & String, Process.Raw>
       Host.write(id, "result.json", with_id(id, Process.show(Process.decode(raw))))
     case Fail{error}:
       do IO<Unit>:
-        stopped : String <- Host.read(id, "stop", 16)
+        stopped : String <- Host.read(id, "stop", marker_limit())
         Host.write(id, "result.json", failure_result(id, stopped))
 
 def execute(+id: String, argv: List<String>, timeout: U32, out: File, err: File) -> IO(Unit):
   do IO<Unit>:
-    result : Result<&1, &1, U32 & String, Process.Raw> <- Process.Native.exec_logged(argv, timeout, out, err)
+    result : Result<&1, &1, U32 & String, Process.Raw> <- Process.Native.exec_logged(
+      argv,
+      timeout,
+      out,
+      err,
+    )
     record_result(id, result)
+
+# Base file effects hand the File back beside their result.
+def Sized() -> Type:
+  File & Result<&1, &1, U32 & String, U32>
+
+def Bytes() -> Type:
+  File & Result<&1, &1, U32 & String, List<&2, U32>>
 
 type Cursor is Type:
   Cursor{file: File, offset: U32, decoder: Streams.Decoder}
@@ -80,11 +139,22 @@ type Cursor is Type:
 type Chunk is Type:
   Chunk{cursor: Cursor, text: String, count: U32, offset: U32, omitted: U32}
 
-def read_decoded(file: File, +offset: U32, +count: U32, omitted: U32, decoded: Streams.Decoder & String) -> Chunk:
+def read_decoded(
+  file: File,
+  +offset: U32,
+  +count: U32,
+  omitted: U32,
+  decoded: Streams.Decoder & String,
+) -> Chunk:
   (decoder, text) = decoded
   Chunk{Cursor{file, U32.add(offset, count), decoder}, text, count, offset, omitted}
 
-def read_result(offset: U32, omitted: U32, decoder: Streams.Decoder, pair: File & Result<&1, &1, U32 & String, List<&2, U32>>) -> IO(Chunk):
+def read_result(
+  offset: U32,
+  omitted: U32,
+  decoder: Streams.Decoder,
+  pair: Bytes,
+) -> IO(Chunk):
   (file, result) = pair
   do IO<Chunk>:
     +bytes : List<&2, U32> <- IO.pass(List<&2, U32>, result)
@@ -98,36 +168,48 @@ def reset(decoder: Streams.Decoder, skipped: Bool) -> Streams.Decoder:
     case False{}:
       decoder
 
-def read_sized(+previous: U32, decoder: Streams.Decoder, pair: File & Result<&1, &1, U32 & String, U32>) -> IO(Chunk):
+# Read the newest window of the (capped) spool, never re-reading before `previous`.
+def read_sized(
+  +previous: U32,
+  decoder: Streams.Decoder,
+  pair: Sized,
+) -> IO(Chunk):
   (file, result) = pair
   do IO<Chunk>:
     +size : U32 <- IO.pass(U32, result)
-    +bounded : U32 = Bool.pick(U32, U32.is_gt(size, 1048576), 1048576, size)
-    +tail : U32 = Bool.pick(U32, U32.is_gt(bounded, 2048), U32.sub(bounded, 2048), 0)
-    +offset : U32 = Bool.pick(U32, U32.is_gt(tail, previous), tail, previous)
+    +bounded : U32 = U32.min(size, spool_limit())
+    +tail : U32 = Bool.pick(U32, U32.is_gt(bounded, window()), U32.sub(bounded, window()), 0)
+    +offset : U32 = U32.max(tail, previous)
     +omitted : U32 = U32.sub(offset, previous)
-    pair : File & Result<&1, &1, U32 & String, List<&2, U32>> <- File.read_at(file, offset, 2048)
+    pair : Bytes <- File.read_at(file, offset, window())
     read_result(offset, omitted, reset(decoder, U32.is_ne(omitted, 0)), pair)
 
 def read(cursor: Cursor) -> IO(Chunk):
   match cursor:
     case Cursor{file, offset, decoder}:
       do IO<Chunk>:
-        pair : File & Result<&1, &1, U32 & String, U32> <- File.size(file)
+        pair : Sized <- File.size(file)
         read_sized(offset, decoder, pair)
 
-def spool_limit(ring: Ring, stream: String, reached: Bool) -> Ring:
+def limit_reached(ring: Ring, stream: String, reached: Bool) -> Ring:
   match reached:
     case False{}:
       ring
     case True{}:
-      event(ring, "process.spool_limit", "{\"stream\":" ++ Json.quote(stream) ++ ",\"limitBytes\":1048576,\"mayBeTruncated\":true}")
+      event(
+        ring,
+        "process.spool_limit",
+        "{\"stream\":" ++ Json.quote(stream)
+          ++ ",\"limitBytes\":1048576,\"mayBeTruncated\":true}",
+      )
 
 def observed(ring: Ring, +stream: String, chunk: Chunk) -> Cursor & (Ring & U32):
   match chunk:
     case Chunk{cursor, text, +count, +offset, omitted}:
-      ring = output(ring, stream, offset, count, omitted, text, U32.is_ne(count, 0))
-      (cursor, (spool_limit(ring, stream, U32.is_ne(count, 0) && U32.is_ge(U32.add(offset, count), 1048576)), count))
+      +read_any : Bool = U32.is_ne(count, 0)
+      ring = output(ring, stream, offset, count, omitted, text, read_any)
+      reached : Bool = read_any && U32.is_ge(U32.add(offset, count), spool_limit())
+      (cursor, (limit_reached(ring, stream, reached), count))
 
 def observe(cursor: Cursor, ring: Ring, stream: String) -> IO(Cursor & (Ring & U32)):
   do IO<Cursor & (Ring & U32)>:
@@ -182,7 +264,14 @@ def turn(out: Cursor, err: Cursor, ring: Ring, receipt: String, done: Bool) -> T
     case False{}:
       Again{out, err, ring}
 
-def tick_finish(id: String, +receipt: String, out: Cursor, out_count: U32, pair: Cursor & (Ring & U32)) -> IO(Turn):
+# Finish only on a quiet tick after the result appeared, so late output is drained.
+def tick_finish(
+  id: String,
+  +receipt: String,
+  out: Cursor,
+  out_count: U32,
+  pair: Cursor & (Ring & U32),
+) -> IO(Turn):
   (err, payload) = pair
   (ring, err_count) = payload
   +ring = {ring : Ring}
@@ -201,9 +290,9 @@ def tick_err(id: String, receipt: String, err: Cursor, pair: Cursor & (Ring & U3
 
 def tick(+id: String, out: Cursor, err: Cursor, ring: Ring) -> IO(Turn):
   do IO<Turn>:
-    stopped : String <- Host.read(id, "stop", 16)
+    stopped : String <- Host.read(id, "stop", marker_limit())
     cancel(stopped)
-    receipt : String <- Host.read(id, "result.json", 1048576)
+    receipt : String <- Host.read(id, "result.json", spool_limit())
     pair : Cursor & (Ring & U32) <- observe(out, ring, "stdout")
     tick_err(id, receipt, err, pair)
 
@@ -232,7 +321,11 @@ def worker_run(+id: String, argv: List<String>, +timeout: U32) -> IO(Unit):
     save(id, ring)
     Host.write(id, "ready", "ready")
     work : Chan(Unit) <- IO.fork(Unit, execute(id, argv, timeout, out, err))
-    control(U32.to_nat(U32.add(U32.div(timeout, 25), 4096)), id, Again{Cursor{out_read, 0, Streams.empty()}, Cursor{err_read, 0, Streams.empty()}, ring})
+    # One tick per 25 ms of the deadline, plus slack for the final drain.
+    fuel : Nat = U32.to_nat(U32.add(U32.div(timeout, 25), 4096))
+    out_cursor : Cursor = Cursor{out_read, 0, Streams.empty()}
+    err_cursor : Cursor = Cursor{err_read, 0, Streams.empty()}
+    control(fuel, id, Again{out_cursor, err_cursor, ring})
     IO.join(Unit, work)
 
 def worker_fresh(id: String, argv: List<String>, timeout: U32, fresh: Bool) -> IO(Unit):
@@ -245,8 +338,8 @@ def worker_fresh(id: String, argv: List<String>, timeout: U32, fresh: Bool) -> I
 def worker(+id: String, argv: List<String>, timeout: U32) -> IO(Unit):
   do IO<Unit>:
     Host.claim(id)
-    ready : String <- Host.read(id, "ready", 16)
-    receipt : String <- Host.read(id, "receipt.json", 1048576)
+    ready : String <- Host.read(id, "ready", marker_limit())
+    receipt : String <- Host.read(id, "receipt.json", spool_limit())
     worker_fresh(id, argv, timeout, String.eq(ready, "") && String.eq(receipt, ""))
 
 # Lease probing never sends a signal. Re-read after a dead lease to avoid
@@ -267,7 +360,7 @@ def liveness(+id: String, alive: Bool) -> IO(String):
       IO.pure(String, "")
     case False{}:
       do IO<String>:
-        receipt : String <- Host.read(id, "receipt.json", 1048576)
+        receipt : String <- Host.read(id, "receipt.json", spool_limit())
         recover(id, receipt)
 
 def receipt(+id: String, current: String) -> IO(String):
@@ -279,9 +372,10 @@ def receipt(+id: String, current: String) -> IO(String):
     case SCon{head, tail}:
       IO.pure(String, SCon{head, tail})
 
+# The terminal receipt, or "" while the worker still holds its lease.
 def status_read(+id: String) -> IO(String):
   do IO<String>:
-    current : String <- Host.read(id, "receipt.json", 1048576)
+    current : String <- Host.read(id, "receipt.json", spool_limit())
     receipt(id, current)
 
 def show_status(id: String, text: String) -> IO(Unit):
@@ -328,7 +422,7 @@ def ready(fuel: Nat, +id: String, text: String) -> IO(Unit):
     case 1n+rest SNil{}:
       do IO<Unit>:
         IO.sleep(25)
-        text : String <- Host.read(id, "ready", 16)
+        text : String <- Host.read(id, "ready", marker_limit())
         ready(rest, id, text)
 
 def spawned(+id: String, result: Result<&1, &1, U32 & String, String>) -> IO(Unit):
@@ -340,11 +434,17 @@ def spawned(+id: String, result: Result<&1, &1, U32 & String, String>) -> IO(Uni
     case Done{ignored}:
       ready(200n, id, "")
 
+# This same executable, re-entered through the private __job-worker command.
+def worker_argv(self: String, id: String, timeout: U32, argv: List<String>) -> List<String>:
+  Con{self, Con{"--", Con{"__job-worker", Con{id, Con{U32.show(timeout), argv}}}}}
+
 def start(argv: List<String>, +timeout: U32) -> IO(Unit):
   do IO<Unit>:
     self : String <- Host.self()
-    +id : String <- Host.create(1024)
-    result : Result<&1, &1, U32 & String, String> <- Host.spawn(Con{self, Con{"--", Con{"__job-worker", Con{id, Con{U32.show(timeout), argv}}}}})
+    +id : String <- Host.create(max_jobs())
+    result : Result<&1, &1, U32 & String, String> <- Host.spawn(
+      worker_argv(self, id, timeout, argv),
+    )
     spawned(id, result)
 
 def first(items: List<&2, String>) -> String:
@@ -368,18 +468,20 @@ def replay_line(line: String, after: U32, sequence: Maybe<&2, U32>) -> IO(Unit):
     case Some{number}:
       replay_keep(line, U32.is_gt(number, after))
 
+# Each line starts with {"sequence":N, (a 12-character prefix before N).
 def replay(items: List<&2, String>, +after: U32) -> IO(Unit):
   match items:
     case Nil{}:
       IO.pure(Unit, Unit{})
     case Con{+line, rest}:
       do IO<Unit>:
-        replay_line(line, after, U32.read(String.drop(first(String.split(line, ',')), 12n)))
+        sequence : Maybe<&2, U32> = U32.read(String.drop(first(String.split(line, ',')), 12n))
+        replay_line(line, after, sequence)
         replay(rest, after)
 
 def events(id: String, after: U32) -> IO(Unit):
   do IO<Unit>:
-    text : String <- Host.read(id, "events.jsonl", 1048576)
+    text : String <- Host.read(id, "events.jsonl", spool_limit())
     replay(String.split(text, '\n'), after)
 
 def event_after(id: String, after: Maybe<&2, U32>) -> IO(Unit):
@@ -396,6 +498,7 @@ def timed_action(action: String, id: String, argv: List<String>, ms: U32) -> IO(
     case "__job-worker":
       worker(id, argv, ms)
     case other:
+      # Polls every 25 ms: ceil(ms / 25) status reads.
       wait(U32.to_nat(U32.div(U32.add(ms, 24), 25)), id)
 
 def timed(action: String, id: String, argv: List<String>, ms: U32, valid: Bool) -> IO(Unit):
@@ -410,7 +513,7 @@ def timeout(action: String, id: String, argv: List<String>, parsed: Maybe<&2, U3
     case None{}:
       IO.die(Unit, 2, "timeout must be 1..3600000 milliseconds")
     case Some{+ms}:
-      timed(action, id, argv, ms, U32.is_ge(ms, 1) && U32.is_le(ms, 3600000))
+      timed(action, id, argv, ms, U32.is_ge(ms, 1) && U32.is_le(ms, Time.max_timeout()))
 
 # Public dispatcher; main forwards these complete argument lists unchanged.
 def command(args: List<String>) -> IO(Unit):
@@ -434,4 +537,9 @@ def command(args: List<String>) -> IO(Unit):
     case Con{"events", Con{id, Con{after, Nil{}}}}:
       event_after(id, U32.read(after))
     case other:
-      IO.die(Unit, 2, "usage: start <timeout-ms> <command> [args...] | status <id> | events <id> [after-sequence] | wait <id> <wait-timeout-ms> | stop <id>")
+      IO.die(
+        Unit,
+        2,
+        "usage: start <timeout-ms> <command> [args...] | status <id>"
+          ++ " | events <id> [after-sequence] | wait <id> <wait-timeout-ms> | stop <id>",
+      )

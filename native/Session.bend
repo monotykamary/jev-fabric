@@ -27,12 +27,32 @@ def mapped(raw: Result<&1, &1, Error, Process.Raw>) -> Outcome:
     case Done{value}:
       Done{Process.decode(value)}
 
-def supervised(argv: List<String>, timeout: U32, input: File, stdout: File, stderr: File) -> IO(Outcome):
+def supervised(
+  argv: List<String>,
+  timeout: U32,
+  input: File,
+  stdout: File,
+  stderr: File,
+) -> IO(Outcome):
   do IO<Outcome>:
-    raw : Result<&1, &1, Error, Process.Raw> <- Process.Native.exec_pipe(argv, input, timeout, stdout, stderr)
+    raw : Result<&1, &1, Error, Process.Raw> <- Process.Native.exec_pipe(
+      argv,
+      input,
+      timeout,
+      stdout,
+      stderr,
+    )
     return mapped(raw)
 
-def opened(pair: File & File, argv: List<String>, timeout: U32, out: File, err: File, out_read: File, err_read: File) -> IO(Session):
+def opened(
+  pair: File & File,
+  argv: List<String>,
+  timeout: U32,
+  out: File,
+  err: File,
+  out_read: File,
+  err_read: File,
+) -> IO(Session):
   (input, writer) = pair
   do IO<Session>:
     result : Chan(Outcome) <- IO.fork(Outcome, supervised(argv, timeout, input, out, err))
@@ -68,7 +88,12 @@ def write_stdin(target: Maybe<&1, File>, text: String) -> IO(Maybe<&1, File> & W
         pair : File & Written <- File.write(file, text)
         return wrote(pair)
 
-def written(pair: Maybe<&1, File> & Written, stdout: File, stderr: File, result: Chan(Outcome)) -> Session & Written:
+def written(
+  pair: Maybe<&1, File> & Written,
+  stdout: File,
+  stderr: File,
+  result: Chan(Outcome),
+) -> Session & Written:
   (stdin, outcome) = pair
   (Session{stdin, stdout, stderr, result}, outcome)
 
@@ -112,9 +137,19 @@ def read_bounded(file: File, offset: U32, max: U32, allowed: Bool) -> IO(File & 
     case True{}:
       File.read_at(file, offset, max)
     case False{}:
-      IO.pure(File & Bytes, (file, Fail{(1, "session read requires offset <= 1048576 and max <= 65536")}))
+      message : String = "session read requires offset <= 1048576 and max <= 65536"
+      IO.pure(File & Bytes, (file, Fail{(1, message)}))
 
-def read_done(pair: File & Bytes, stdin: Maybe<&1, File>, other: File, result: Chan(Outcome), error_stream: Bool) -> Session & Bytes:
+def read_allowed(+offset: U32, +max: U32) -> Bool:
+  U32.is_le(max, 65536) && U32.is_le(offset, spool_limit())
+
+def read_done(
+  pair: File & Bytes,
+  stdin: Maybe<&1, File>,
+  other: File,
+  result: Chan(Outcome),
+  error_stream: Bool,
+) -> Session & Bytes:
   (file, outcome) = pair
   match error_stream:
     case False{}:
@@ -126,23 +161,34 @@ def read_stdout(session: Session, +offset: U32, +max: U32) -> IO(Session & Bytes
   match session:
     case Session{stdin, stdout, stderr, result}:
       do IO<Session & Bytes>:
-        pair : File & Bytes <- read_bounded(stdout, offset, max, U32.is_le(max, 65536) && U32.is_le(offset, spool_limit()))
+        pair : File & Bytes <- read_bounded(stdout, offset, max, read_allowed(offset, max))
         return read_done(pair, stdin, stderr, result, False{})
 
 def read_stderr(session: Session, +offset: U32, +max: U32) -> IO(Session & Bytes):
   match session:
     case Session{stdin, stdout, stderr, result}:
       do IO<Session & Bytes>:
-        pair : File & Bytes <- read_bounded(stderr, offset, max, U32.is_le(max, 65536) && U32.is_le(offset, spool_limit()))
+        pair : File & Bytes <- read_bounded(stderr, offset, max, read_allowed(offset, max))
         return read_done(pair, stdin, stdout, result, True{})
 
-def size_err(pair: File & Result<&1, &1, Error, U32>, stdin: Maybe<&1, File>, stdout: File, result: Chan(Outcome), count_out: U32) -> IO(Session & (U32 & U32)):
+def size_err(
+  pair: File & Result<&1, &1, Error, U32>,
+  stdin: Maybe<&1, File>,
+  stdout: File,
+  result: Chan(Outcome),
+  count_out: U32,
+) -> IO(Session & (U32 & U32)):
   (stderr, value) = pair
   do IO<Session & (U32 & U32)>:
     count_err : U32 <- IO.pass(U32, value)
     return (Session{stdin, stdout, stderr, result}, (count_out, count_err))
 
-def size_out(pair: File & Result<&1, &1, Error, U32>, stdin: Maybe<&1, File>, stderr: File, result: Chan(Outcome)) -> IO(Session & (U32 & U32)):
+def size_out(
+  pair: File & Result<&1, &1, Error, U32>,
+  stdin: Maybe<&1, File>,
+  stderr: File,
+  result: Chan(Outcome),
+) -> IO(Session & (U32 & U32)):
   (stdout, value) = pair
   do IO<Session & (U32 & U32)>:
     count_out : U32 <- IO.pass(U32, value)

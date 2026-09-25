@@ -6,17 +6,32 @@ def Raw() -> Type:
   U32 & (U32 & (String & String))
 
 # Custom foreign effects. These are native C, not JavaScript.
-def Native.exec(argv: List<String>, input: String, timeout_ms: U32, inherit_stdin: Bool) -> IO(Result<&1, &1, U32 & String, Raw>):
+def Native.exec(
+  argv: List<String>,
+  input: String,
+  timeout_ms: U32,
+  inherit_stdin: Bool,
+) -> IO(Result<&1, &1, U32 & String, Raw>):
   import "./posix.c"
 
 def RawBytes() -> Type:
   U32 & (U32 & (List<&2, U32> & List<&2, U32>))
 
 # Bounded byte-exact private capture. Callers must reject either truncation flag.
-def Native.capture(argv: List<String>, input: String, timeout_ms: U32, limit: U32) -> IO(Result<&1, &1, U32 & String, RawBytes>):
+def Native.capture(
+  argv: List<String>,
+  input: String,
+  timeout_ms: U32,
+  limit: U32,
+) -> IO(Result<&1, &1, U32 & String, RawBytes>):
   import "./posix.c"
 
-def capture(argv: List<String>, input: String, timeout_ms: U32, limit: U32) -> IO(Result<&1, &1, U32 & String, RawBytes>):
+def capture(
+  argv: List<String>,
+  input: String,
+  timeout_ms: U32,
+  limit: U32,
+) -> IO(Result<&1, &1, U32 & String, RawBytes>):
   Native.capture(argv, input, timeout_ms, limit)
 
 # One CLOEXEC pipe; both ends are independent File handles the caller owns.
@@ -34,11 +49,27 @@ def cancel(signal: U32) -> IO(Unit):
   Native.cancel()
 
 type Report is Data:
-  Report{code: U32, timed_out: Bool, cancelled: Bool, stdout_cut: Bool, stderr_cut: Bool, stdout: String, stderr: String}
+  Report{
+    code: U32,
+    timed_out: Bool,
+    cancelled: Bool,
+    stdout_cut: Bool,
+    stderr_cut: Bool,
+    stdout: String,
+    stderr: String,
+  }
 
+def flag_set(flags: U32, bit: U32) -> Bool:
+  U32.is_ne((flags .&. bit : U32), 0)
+
+# Flag bits set by posix.c: 1 timed out, 2 stdout cut, 4 stderr cut, 8 cancelled.
 def decode(raw: Raw) -> Report:
   (code, (+flags, (stdout, stderr))) = raw
-  Report{code, U32.is_ne((flags .&. 1 : U32), 0), U32.is_ne((flags .&. 8 : U32), 0), U32.is_ne((flags .&. 2 : U32), 0), U32.is_ne((flags .&. 4 : U32), 0), stdout, stderr}
+  timed_out = flag_set(flags, 1)
+  cancelled = flag_set(flags, 8)
+  stdout_cut = flag_set(flags, 2)
+  stderr_cut = flag_set(flags, 4)
+  Report{code, timed_out, cancelled, stdout_cut, stderr_cut, stdout, stderr}
 
 def run(argv: List<String>, input: String, timeout_ms: U32) -> IO(Report):
   do IO<Report>:
@@ -67,16 +98,32 @@ def exec_stdin(argv: List<String>) -> IO(Report):
 
 # Spool the first 1 MiB per stream to owned regular files; retain bounded final tails.
 # Both file handles are consumed and closed by the effect, including failure paths.
-def Native.exec_logged(argv: List<String>, timeout_ms: U32, stdout: File, stderr: File) -> IO(Result<&1, &1, U32 & String, Raw>):
+def Native.exec_logged(
+  argv: List<String>,
+  timeout_ms: U32,
+  stdout: File,
+  stderr: File,
+) -> IO(Result<&1, &1, U32 & String, Raw>):
   import "./posix.c"
 
 # Interactive sibling of exec_logged: input is the read end of a stdin pipe
 # the effect consumes and closes; stdout/stderr are spool writer handles it
 # consumes too. Deadlines, process-group cleanup, tails and spool bounds match.
-def Native.exec_pipe(argv: List<String>, input: File, timeout_ms: U32, stdout: File, stderr: File) -> IO(Result<&1, &1, U32 & String, Raw>):
+def Native.exec_pipe(
+  argv: List<String>,
+  input: File,
+  timeout_ms: U32,
+  stdout: File,
+  stderr: File,
+) -> IO(Result<&1, &1, U32 & String, Raw>):
   import "./posix.c"
 
-def run_logged(argv: List<String>, timeout_ms: U32, stdout: File, stderr: File) -> IO(Report):
+def run_logged(
+  argv: List<String>,
+  timeout_ms: U32,
+  stdout: File,
+  stderr: File,
+) -> IO(Report):
   do IO<Report>:
     raw : Raw <- IO.try(Raw, Native.exec_logged(argv, timeout_ms, stdout, stderr))
     return decode(raw)
@@ -100,11 +147,15 @@ def state(code: U32, timed_out: Bool, cancelled: Bool) -> String:
 def show(report: Report) -> String:
   match report:
     case Report{+code, +timed_out, +cancelled, out_cut, err_cut, stdout, stderr}:
-      "{\"schemaVersion\":1,\"state\":" ++ Json.quote(state(code, timed_out, cancelled)) ++
-      ",\"exitCode\":" ++ U32.show(code) ++ ",\"timedOut\":" ++ Json.boolean(timed_out) ++
-      ",\"cancelled\":" ++ Json.boolean(cancelled) ++ ",\"stdout\":" ++ Json.quote(stdout) ++
-      ",\"stderr\":" ++ Json.quote(stderr) ++ ",\"truncated\":{\"stdout\":" ++ Json.boolean(out_cut) ++
-      ",\"stderr\":" ++ Json.boolean(err_cut) ++ "}}"
+      "{\"schemaVersion\":1,\"state\":" ++ Json.quote(state(code, timed_out, cancelled))
+        ++ ",\"exitCode\":" ++ U32.show(code)
+        ++ ",\"timedOut\":" ++ Json.boolean(timed_out)
+        ++ ",\"cancelled\":" ++ Json.boolean(cancelled)
+        ++ ",\"stdout\":" ++ Json.quote(stdout)
+        ++ ",\"stderr\":" ++ Json.quote(stderr)
+        ++ ",\"truncated\":{\"stdout\":" ++ Json.boolean(out_cut)
+        ++ ",\"stderr\":" ++ Json.boolean(err_cut)
+        ++ "}}"
 
 def exit_code(report: Report) -> U32:
   match report:

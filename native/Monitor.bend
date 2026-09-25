@@ -26,7 +26,13 @@ def emit_end(summary: Policy.Summary, reason: String, terminal: Bool, elapsed: N
         case Policy.Model{last, out, err, losses, finished2}:
           IO.print(Policy.end_json(reason, terminal, lines, batches, losses, elapsed))
 
-def finalize(model: Policy.Model, literal: String, started: Nat, reason: String, +terminal: Bool) -> IO(Unit):
+def finalize(
+  model: Policy.Model,
+  literal: String,
+  started: Nat,
+  reason: String,
+  +terminal: Bool,
+) -> IO(Unit):
   do IO<Unit>:
     drained : Policy.Model <- emit(Policy.drain(model, literal, terminal))
     now : Nat <- IO.now()
@@ -45,15 +51,33 @@ def prepare(model: Policy.Model, decision: Policy.Decision) -> IO(Turn):
     case Policy.Stop{reason, terminal}:
       IO.pure(Turn, End{model, reason, terminal})
 
-def tick(+id: String, +literal: String, started: Nat, duration: Nat, model: Policy.Model) -> IO(Turn):
+# Largest events/receipt file Host will read.
+def read_limit() -> U32:
+  1048576
+
+def tick(
+  +id: String,
+  +literal: String,
+  started: Nat,
+  duration: Nat,
+  model: Policy.Model,
+) -> IO(Turn):
   do IO<Turn>:
-    events : String <- Host.read(id, "events.jsonl", 1048576)
-    +next : Policy.Model <- emit(Policy.consume(String.split(events, '\n'), model, literal, Policy.batch_max()))
-    receipt : String <- Host.read(id, "receipt.json", 1048576)
+    events : String <- Host.read(id, "events.jsonl", read_limit())
+    lines : List<&2, String> = String.split(events, '\n')
+    +next : Policy.Model <- emit(Policy.consume(lines, model, literal, Policy.batch_max()))
+    receipt : String <- Host.read(id, "receipt.json", read_limit())
     now : Nat <- IO.now()
     prepare(next, Policy.decide(Policy.summarize(next), receipt, Nat.sub(now, started), duration))
 
-def loop(remaining: Nat, +id: String, +literal: String, +started: Nat, +duration: Nat, turn: Turn) -> IO(Unit):
+def loop(
+  remaining: Nat,
+  +id: String,
+  +literal: String,
+  +started: Nat,
+  +duration: Nat,
+  turn: Turn,
+) -> IO(Unit):
   match remaining turn:
     case _ End{model, reason, terminal}:
       finalize(model, literal, started, reason, terminal)
@@ -67,7 +91,11 @@ def loop(remaining: Nat, +id: String, +literal: String, +started: Nat, +duration
 def watch_parsed(+id: String, +literal: String, parsed: Maybe<&2, Nat>) -> IO(Unit):
   match parsed:
     case None{}:
-      IO.die(Unit, 2, "usage: watch <id> <duration-ms> <literal>; duration 1..300000, literal 1..256 chars")
+      IO.die(
+        Unit,
+        2,
+        "usage: watch <id> <duration-ms> <literal>; duration 1..300000, literal 1..256 chars",
+      )
     case Some{+duration}:
       do IO<Unit>:
         started : Nat <- IO.now()
