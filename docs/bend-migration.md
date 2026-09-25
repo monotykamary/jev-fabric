@@ -29,7 +29,7 @@ cancellable IO, bounded raw capture/spools, signals and descriptor cleanup.
 `native/host.c` handles private no-follow filesystem operations, atomic file
 replacement, random job IDs, advisory ownership leases, self-executable lookup
 and detached spawn. A 26-line `native/pipe.c` supplies owned pipe descriptors.
-Together these are 610 physical C lines; none parses Jev JSON or decides
+Together these are 1126 physical C lines; none parses Jev JSON or decides
 application policy.
 
 Bend owns credentials, provider routes, curl config escaping, deadlines/budgets,
