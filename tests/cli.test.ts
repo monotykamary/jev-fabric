@@ -7,13 +7,17 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
-function command(args: string[], input = ''): Promise<{ code: number | null; out: string; err: string }> {
+function command(args: string[], input = '', execArgv: string[] = [], ownedWorkers?: Set<number>): Promise<{ code: number | null; out: string; err: string }> {
   return new Promise((resolveResult, reject) => {
-    const child = spawn(process.execPath, [cli, ...args], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, JEV_PROVIDER: 'typesafe' } });
+    const child = spawn(process.execPath, [...execArgv, cli, ...args], { stdio: ownedWorkers ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], env: { ...process.env, JEV_PROVIDER: 'typesafe' } });
+    child.on('message', value => {
+      const msg = value as { kind?: string; pid?: number };
+      if (msg.kind === 'test.worker' && Number.isSafeInteger(msg.pid) && msg.pid! > 0) ownedWorkers?.add(msg.pid!);
+    });
     let out = '', err = '';
-    child.stdout.on('data', data => { out += data; }); child.stderr.on('data', data => { err += data; });
+    child.stdout!.on('data', data => { out += data; }); child.stderr!.on('data', data => { err += data; });
     child.once('error', reject); child.once('close', code => resolveResult({ code, out, err }));
-    child.stdin.end(input);
+    child.stdin!.end(input);
   });
 }
 async function fixture(t: TestContext, source: string, extension = 'mjs') {
@@ -75,6 +79,111 @@ test('stdin program, argv errors and explicit handoff exit status', async t => {
   assert.equal(handoff.code, 3, handoff.err + handoff.out); assert.equal(JSON.parse(handoff.out).state, 'needs_attention');
   assert.equal((await command(['status', '../../not-a-run', ...f.args])).code, 2);
   assert.equal((await command(['run', f.program, '--timeout-ms', '0', ...f.args])).code, 2);
+});
+
+async function guardWorkerGroup(t: TestContext, directory: string) {
+  const ownedWorkers = new Set<number>();
+  // The deliberately red version crashes the CLI: retain registrations outside
+  // the fixture directory so cleanup still works after its removal.
+  t.after(() => {
+    for (const pid of ownedWorkers) {
+      try { process.kill(-pid, 'SIGKILL'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    }
+  });
+  const preload = join(directory, 'group-guard.mjs');
+  const marker = join(directory, 'group-signals.jsonl');
+  await writeFile(preload, `
+    import cp from 'node:child_process';
+    import {syncBuiltinESMExports} from 'node:module';
+    import {appendFileSync} from 'node:fs';
+    const originalFork = cp.fork, originalKill = process.kill;
+    let worker;
+    cp.fork = function(...args) {
+      const child = originalFork.apply(this, args);
+      if (String(args[0]).endsWith('/worker.js')) {
+        worker = child;
+        process.send?.({kind:'test.worker', pid:child.pid});
+      }
+      return child;
+    };
+    syncBuiltinESMExports();
+    process.kill = function(pid, signal) {
+      if (worker && pid === -worker.pid) {
+        const reaped = worker.exitCode !== null || worker.signalCode !== null;
+        appendFileSync(${JSON.stringify(marker)}, JSON.stringify({reaped, signal}) + '\\n');
+        // Darwin returns EPERM for a zombie-only group before waitpid reaps it.
+        if (!reaped) throw Object.assign(new Error('simulated zombie-group EPERM'), {code:'EPERM'});
+      }
+      return originalKill.call(this, pid, signal);
+    };
+  `);
+  return { execArgv: ['--import', preload], marker, ownedWorkers };
+}
+
+async function assertWorkerGroupAfterReap(marker: string) {
+  const calls = (await readFile(marker, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.ok(calls.length > 0, 'must still signal the worker group after reaping');
+  assert.ok(calls.every(call => call.reaped && call.signal === 'SIGKILL'), JSON.stringify(calls));
+}
+
+test('worker-group signal waits for reaping and preserves handoff', { timeout: 12000 }, async t => {
+  const f = await fixture(t, "export default ({handoff}) => handoff('Need review', {reason:'ambiguous'});");
+  const guard = await guardWorkerGroup(t, f.directory);
+  const result = await command(['run', f.program, ...f.args], '', guard.execArgv, guard.ownedWorkers);
+  assert.equal(result.code, 3, result.err + result.out);
+  assert.equal(JSON.parse(result.out).state, 'needs_attention');
+  await assertWorkerGroupAfterReap(guard.marker);
+  guard.ownedWorkers.clear();
+});
+
+test('concurrent handoffs retain their receipts across repeated worker exits', { timeout: 20000 }, async t => {
+  const f = await fixture(t, 'export default () => null');
+  // No preload or IPC instrumentation: exercise the public CLI under real exits.
+  const lanes = await Promise.all(Array.from({length: 4}, async (_, lane) => {
+    const results = [];
+    for (let i = lane; i < 24; i += 4) {
+      results.push(await command(['run', '-', ...f.args], `export default ({handoff}) => handoff('Review ${i}');`));
+    }
+    return results;
+  }));
+  for (const result of lanes.flat()) {
+    assert.equal(result.code, 3, result.err + result.out);
+    assert.equal(JSON.parse(result.out).state, 'needs_attention');
+  }
+});
+
+test('worker-group signal waits for reaping on a forced deadline', { timeout: 12000 }, async t => {
+  const f = await fixture(t, 'export default () => { while(true) {} };');
+  const guard = await guardWorkerGroup(t, f.directory);
+  const result = await command(['run', f.program, '--timeout-ms', '500', ...f.args], '', guard.execArgv, guard.ownedWorkers);
+  assert.equal(result.code, 124, result.err + result.out);
+  assert.equal(JSON.parse(result.out).state, 'timed_out');
+  await assertWorkerGroupAfterReap(guard.marker);
+  guard.ownedWorkers.clear();
+});
+
+test('worker-group signal after reaping still kills inherited descendants', { timeout: 12000 }, async t => {
+  const f = await fixture(t, `import {spawn} from 'node:child_process';
+export default async () => {
+  const child = spawn(process.execPath, ['-e', 'console.log(process.pid);setInterval(()=>{},1000)'], {stdio:['ignore','pipe','ignore']});
+  const pid = await new Promise(resolve => child.stdout.once('data', data => resolve(Number(data.toString().trim()))));
+  return {pid};
+};`);
+  const guard = await guardWorkerGroup(t, f.directory);
+  const result = await command(['run', f.program, ...f.args], '', guard.execArgv, guard.ownedWorkers);
+  assert.equal(result.code, 0, result.err + result.out);
+  const pid = JSON.parse(result.out).result.pid as number;
+  t.after(() => { try { process.kill(pid, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; } });
+  let absent = false;
+  for (let i = 0; i < 100; i++) {
+    try { process.kill(pid, 0); }
+    catch (error) { assert.equal((error as NodeJS.ErrnoException).code, 'ESRCH'); absent = true; break; }
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 20));
+  }
+  assert.ok(absent, `inherited descendant ${pid} survived worker cleanup`);
+  await assertWorkerGroupAfterReap(guard.marker);
+  guard.ownedWorkers.clear();
 });
 
 test('detached start/status/events/wait/stop work across independent CLI processes', async t => {

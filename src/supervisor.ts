@@ -34,7 +34,10 @@ export async function supervise(plan: RunPlan, signal?: AbortSignal, ready?: () 
     cwd: plan.cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], execArgv: [],
   });
   const cleanupGroups = () => { for (const pid of groups) killGroup(pid, 'SIGKILL'); groups.clear(); };
-  const force = () => { cleanupGroups(); killGroup(worker.pid, 'SIGKILL'); };
+  // Darwin can return EPERM for a zombie-only group before waitpid reaps its
+  // leader. Stop the owned child handle first; finish() signals the group after
+  // the exit event, when the leader is reaped, to remove surviving descendants.
+  const force = () => { cleanupGroups(); worker.kill('SIGKILL'); };
   const cancel = (state: 'cancelled' | 'timed_out') => {
     if (finished || desired) return;
     desired = { state, evaluations: run.evaluations, usage: run.usage };
