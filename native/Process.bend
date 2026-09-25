@@ -4,9 +4,33 @@ import ./Json.bend as Json
 def Raw() -> Type:
   U32 & (U32 & (String & String))
 
-# This is the only custom foreign effect. It is native C, not JavaScript.
+# Custom foreign effects. These are native C, not JavaScript.
 def Native.exec(argv: List<String>, input: String, timeout_ms: U32, inherit_stdin: Bool) -> IO(Result<&1, &1, U32 & String, Raw>):
   import "./posix.c"
+
+def RawBytes() -> Type:
+  U32 & (U32 & (List<&2, U32> & List<&2, U32>))
+
+# Bounded byte-exact private capture. Callers must reject either truncation flag.
+def Native.capture(argv: List<String>, input: String, timeout_ms: U32, limit: U32) -> IO(Result<&1, &1, U32 & String, RawBytes>):
+  import "./posix.c"
+
+def capture(argv: List<String>, input: String, timeout_ms: U32, limit: U32) -> IO(Result<&1, &1, U32 & String, RawBytes>):
+  Native.capture(argv, input, timeout_ms, limit)
+
+# One CLOEXEC pipe; both ends are independent File handles the caller owns.
+def Native.pipe() -> IO(Result<&1, &1, U32 & String, File & File>):
+  import "./pipe.c"
+
+def pipe() -> IO(Result<&1, &1, U32 & String, File & File>):
+  Native.pipe()
+
+# Interrupt this executable's owned process scope, never a persisted arbitrary PID.
+def Native.cancel() -> IO(Unit):
+  import "./posix.c"
+
+def cancel(signal: U32) -> IO(Unit):
+  Native.cancel()
 
 type Report is Data:
   Report{code: U32, timed_out: Bool, cancelled: Bool, stdout_cut: Bool, stderr_cut: Bool, stdout: String, stderr: String}
@@ -23,6 +47,22 @@ def run(argv: List<String>, input: String, timeout_ms: U32) -> IO(Report):
 def run_stdin(argv: List<String>, timeout_ms: U32) -> IO(Report):
   do IO<Report>:
     raw : Raw <- IO.try(Raw, Native.exec(argv, "", timeout_ms, True{}))
+    return decode(raw)
+
+# Spool the first 1 MiB per stream to owned regular files; retain bounded final tails.
+# Both file handles are consumed and closed by the effect, including failure paths.
+def Native.exec_logged(argv: List<String>, timeout_ms: U32, stdout: File, stderr: File) -> IO(Result<&1, &1, U32 & String, Raw>):
+  import "./posix.c"
+
+# Interactive sibling of exec_logged: input is the read end of a stdin pipe
+# the effect consumes and closes; stdout/stderr are spool writer handles it
+# consumes too. Deadlines, process-group cleanup, tails and spool bounds match.
+def Native.exec_pipe(argv: List<String>, input: File, timeout_ms: U32, stdout: File, stderr: File) -> IO(Result<&1, &1, U32 & String, Raw>):
+  import "./posix.c"
+
+def run_logged(argv: List<String>, timeout_ms: U32, stdout: File, stderr: File) -> IO(Report):
+  do IO<Report>:
+    raw : Raw <- IO.try(Raw, Native.exec_logged(argv, timeout_ms, stdout, stderr))
     return decode(raw)
 
 def state_code(success: Bool) -> String:

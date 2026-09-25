@@ -2,6 +2,7 @@ node_modules/
 dist/
 .tmp/
 build/
+.jev-fabric-native/
 .cache/
 .npm/
 .env

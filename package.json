@@ -5,10 +5,9 @@
   "description": "Process orchestration with typed System One decisions, independent of any agent harness.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=24" },
-  "bin": { "jev-fabric": "dist/src/cli.js" },
+  "bin": { "jev-fabric": "build/jev-fabric", "jev-fabric-reference": "dist/src/cli.js" },
   "exports": { ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" } },
-  "files": ["dist/src", "examples", "docs", "README.md", "LICENSE"],
+  "files": ["native", "scripts", "dist/src", "examples", "docs", "README.md", "LICENSE"],
   "scripts": {
     "build": "sh scripts/build-native.sh",
     "build:reference": "tsc -p tsconfig.json",
@@ -17,7 +16,8 @@
     "test:native": "sh scripts/test-native.sh",
     "test:reference": "bun run build:reference && node --test dist/tests/*.test.js",
     "test": "bun run test:native && bun run test:reference",
-    "demo": "node dist/src/cli.js run examples/pipeline.ts"
+    "demo": "sh scripts/build-native.sh && build/jev-fabric -- run 20000 examples/native/pipeline.bend",
+    "demo:reference": "node dist/src/cli.js run examples/pipeline.ts"
   },
   "devDependencies": { "@types/node": "^24.0.0", "typescript": "^6.0.0" }
 }

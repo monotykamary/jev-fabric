@@ -1,0 +1,21 @@
+# Native codec provenance and limits
+
+`strict-json/json.bend` derives from BendHub package `0xda09635d9d188749939d77eb0a5769b8`, itself adapted from H4ad/bend-stdlib. Apache-2.0 license and all source attribution are retained. `upstream.manifest` records SHA-256 hashes of the original files. Local change: reject incomplete numbers before a delimiter, not only at EOF; remove decorative comment rules.
+
+No source from codec package `0x888714bde93f46c139372bb9fdc57a19` is vendored: its license was not established. UTF-8 decoding is independently implemented in Codec.bend.
+
+Public callers must use Codec, not the unbounded vendor entry points. Codec bounds input to 1 MiB UTF-8, nesting to 64, outside-string non-whitespace characters to 32768, AST work to 32768 steps, object fields to 256, decoded key length to 256 scalars, and cumulative key comparison cost to 1 MiB. Encoding validates an AST before invoking the upstream unsafe encoder and checks its output again. These are intentional resource limits, including on otherwise valid descriptions.
+
+Wire keeps raw JSON number lexemes. Numeric wire scalars use exact bounded decimal arithmetic, never F32 rounding. Wire scalar exponent magnitudes are limited to 4096 and all numeric lexemes to 1024 characters. Probability bounds and mass tolerance use exact decimal digit arithmetic, including fractions longer than twelve digits. Native Nat has a 48-bit representable range: usage counts above 281474976710655 are rejected, even when JavaScript would call them safe integers. This is an explicit narrower contract pending a wider native accounting type.
+
+## Acceptance ledger
+
+- Parser and encoder: stock Bend native binaries; no new effects, runtime, npm dependency, or compiler fork. Encoder's upstream unsafe loop is reachable only after bounded AST validation. Invalid standalone members, object entries, number lexemes, scalars, duplicate keys, and oversized output are rejected.
+- Unicode: strict scalar strings, surrogate-pair escapes, independently implemented strict UTF-8; overlong forms, lone continuations, truncation, surrogates, out-of-range scalars and non-byte U32 values rejected.
+- Bounds: 1 MiB raw UTF-8, depth 64, 32768 outside-string work and AST job steps, 256 members per object, 256 decoded scalars per key, 1 MiB cumulative key-comparison charge, 1024-character numeric lexemes. UTF-8 limit applies to decoded HTTP bodies as well as JSON input. UTF-16 units are used for wire label/ID length parity.
+- Wire request schema: strict top-level/question keys; 1..128 questions, Choice 1..255, Score 2..10, optional Noul true/false descriptions, correct model default behavior.
+- Wire responses: matching typed answers and exact key coverage, exact probability bounds and exact mass tolerance `[0.98, 1.02]`, score bounds, exact integer usage, request-derived legends, no retained unknown provider fields.
+- Numeric behavior intentionally differs from binary-floating reference behavior: no F32/F64 rounding, underflow, or overflow is used to validate wire scalars. Raw lexemes survive normalization. Exact mass values just outside the tolerance fail even if a JavaScript approximation could round to a boundary. JSON description numbers remain raw JSON decimals, not JavaScript Number conversions.
+- Native resource bounds are independent of the TypeScript utility's 128 KiB/depth-32 serialization limits. This is not a claim of byte-for-byte TypeScript serialization parity.
+- API: `Codec.Value() -> Data` (not Type: callers need `+Codec.Value` and `List<&2, Codec.Value>`), `read`, `encode`, `field`, `text`, `array`, `read_bytes`, `decode_utf8`; `Wire.request`, `body`, `response`, `usage`. No transport or process changes are needed from this unit.
+- Checks: `bend native/tests/codec.bend -o build/test-codec` (35 assertions); `bend native/tests/codec-limits.bend -o build/test-codec-limits` (15 assertions); `bend native/tests/wire.bend -o build/test-wire` (28 assertions). `bun test native/tests/codec-wire.test.ts` builds these plus the black-box probe and tests adversarial schemas/numeric fidelity against native binaries.

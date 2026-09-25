@@ -1,7 +1,7 @@
 # Verification evidence
 
 > Historical evidence for the TypeScript baseline. Current native coverage and
-> limitations are recorded in [the Bend migration ledger](bend-migration.md).
+> limitations are recorded in [the native rewrite ledger](native-rewrite-ledger.md).
 
 Initial implementation verified on 2026-09-24.
 

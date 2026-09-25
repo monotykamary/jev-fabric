@@ -24,7 +24,7 @@ function gone(pid: number) {
 
 describe('native Bend/POSIX boundary', () => {
   test('help, version, rejected commands and timeout syntax', async () => {
-    expect((await command(['--help'])).stdout).toContain('native Bend spike');
+    expect((await command(['--help'])).stdout).toContain('native Bend');
     expect((await command(['--version'])).stdout).toContain('Bend 2.0.27');
     expect((await command(['start'])).code).toBe(2);
     expect((await command(['exec', 'oops', '/bin/echo'])).code).toBe(2);

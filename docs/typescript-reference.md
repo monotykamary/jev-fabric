@@ -36,7 +36,7 @@ bun run test:reference
 ```
 
 These examples and the test suite are offline: local fixture processes, no model
-keys, browser, or native apps. The installed binary is `jev-fabric`; the
+keys, browser, or native apps. The explicit reference binary is `jev-fabric-reference`; the
 `node dist/src/cli.js` form works directly from the checkout.
 
 ## Ordinary programs
