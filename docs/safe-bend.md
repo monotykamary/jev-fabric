@@ -111,7 +111,10 @@ same build path. The gate lexes all native/example Bend, checks classifications,
 local transitive imports, explicit IO capabilities, the exact foreign allowlist,
 unsafe spellings, proof holes and missing law bodies. It then checks **every
 module** with the pinned compiler, rejecting trust/incomplete verdicts in the
-pure closure. Imports are checked even when currently unused.
+pure closure. Imports are checked even when currently unused. Compiler checks
+run concurrently (`JEV_CHECK_JOBS`, default half the CPUs up to 4) but are
+judged in source order, so the log and the first rejection match a sequential
+run.
 
 The lexer/manifest checks supplement the compiler; they are not a new proof
 kernel or a formally verified purity checker. Adversarial tests exercise unsafe
